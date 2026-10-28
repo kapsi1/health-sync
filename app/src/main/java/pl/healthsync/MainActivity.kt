@@ -23,7 +23,14 @@ import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import pl.healthsync.data.HealthHistorySource
+import pl.healthsync.data.RoomHistoryStore
+import pl.healthsync.data.SyncDatabase
+import pl.healthsync.domain.HistoryImport
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 private val stepsPermission = HealthPermission.getReadPermission(StepsRecord::class)
@@ -43,6 +50,10 @@ class MainActivity : ComponentActivity() {
         var result by remember { mutableStateOf("Naciśnij „Sprawdź”, aby odczytać status i dostępność danych.") }
         var preview by remember { mutableStateOf("") }
         var reading by remember { mutableStateOf(false) }
+        var historyStart by remember { mutableStateOf("2000-01-01") }
+        var historyStatus by remember { mutableStateOf("Import działa na pierwszym planie; zapisane miesiące można wznowić.") }
+        var historyJob by remember { mutableStateOf<Job?>(null) }
+        val importer = remember(client) { client?.let { HistoryImport(HealthHistorySource(it), RoomHistoryStore(SyncDatabase.get(applicationContext).importDao())) } }
         val selections = remember { MetricSelection(applicationContext) }
         val selected by selections.selected.collectAsState(initial = emptySet())
         var granted by remember { mutableStateOf(emptySet<String>()) }
@@ -105,6 +116,49 @@ class MainActivity : ComponentActivity() {
                     }
                 }, enabled = !reading && selected.isNotEmpty()) { Text(if (reading) "Odczyt..." else "Podgląd ostatnich 7 dni") }
                 if (preview.isNotEmpty()) Text(preview)
+                Text("Import historii", style = MaterialTheme.typography.titleLarge)
+                Text("Początek importu to najwcześniejsza data, którą ma przeszukać aplikacja. Import w tym etapie wymaga otwartej aplikacji i nie wysyła danych do arkusza.")
+                OutlinedTextField(value = historyStart, onValueChange = { historyStart = it }, label = { Text("Data od (RRRR-MM-DD)") }, singleLine = true, enabled = historyJob == null)
+                fun startImport(refresh: Boolean) {
+                    val start = try { LocalDate.parse(historyStart) } catch (_: Exception) { historyStatus = "Wpisz poprawną datę w formacie RRRR-MM-DD."; return }
+                    val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+                    if (start.year < 1900 || start > today) { historyStatus = "Data musi mieścić się między 1900-01-01 a dzisiaj."; return }
+                    val metrics = MetricRegistry.all.filter { it.id in selected }
+                    if (metrics.isEmpty()) { historyStatus = "Wybierz przynajmniej jedną statystykę."; return }
+                    historyJob = scope.launch {
+                        try {
+                            val current = client.permissionController.getGrantedPermissions()
+                            granted = current
+                            check(metrics.all { it.permission in current }) { "Przyznaj zgody dla wszystkich wybranych statystyk." }
+                            val earliestRead = if (metrics.any { it.id == "sleep_duration" }) start.minusDays(7) else start
+                            if (earliestRead < today.minusDays(28)) {
+                                check(available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) && HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in current) { "Przyznaj zgodę na starszą historię albo wybierz późniejszą datę." }
+                            }
+                            importer!!.run(metrics.map { it.id }, start, today.plusDays(1), refresh) { progress ->
+                                val name = metrics.first { it.id == progress.metricId }.label
+                                historyStatus = "${progress.processed}/${progress.total} porcji · $name · ${progress.range.start} – ${progress.range.endExclusive.minusDays(1)}${if (progress.skipped) " · wcześniej zapisano" else " · zapisano"}"
+                            }
+                            val summaries = SyncDatabase.get(applicationContext).importDao().summaries().associateBy { it.metricId }
+                            val counts = metrics.joinToString("\n") { metric ->
+                                val summary = summaries[metric.id]
+                                if (summary == null) "${metric.label}: brak zapisanych dni" else "${metric.label}: ${summary.dayCount} dni, najstarszy ${summary.earliestDate}"
+                            }
+                            historyStatus = "Import zakończony lokalnie. Wysyłka do arkusza jeszcze nie działa. Podsumowanie obejmuje wszystkie wcześniej zapisane dane:\n$counts"
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            historyStatus = "Import przerwany. Zapisane porcje można wznowić."
+                            throw e
+                        } catch (e: Exception) {
+                            historyStatus = "Import zatrzymany: ${e.message ?: e.javaClass.simpleName}. Zapisane porcje można wznowić."
+                        } finally { historyJob = null }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { startImport(false) }, enabled = historyJob == null) { Text("Importuj / wznów") }
+                    OutlinedButton(onClick = { historyJob?.cancel() }, enabled = historyJob != null) { Text("Przerwij") }
+                }
+                OutlinedButton(onClick = { startImport(true) }, enabled = historyJob == null) { Text("Importuj ponownie") }
+                Text(historyStatus)
+                GoogleAuthorization(this@MainActivity)
                 Text("Diagnostyka", style = MaterialTheme.typography.titleLarge)
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY)) { Text("Zezwól na starszą historię") }
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND)) { Text("Zezwól na odczyt w tle") }
@@ -139,6 +193,6 @@ private suspend fun diagnose(client: HealthConnectClient): String = try {
 class PrivacyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { Text("Wersja rozwojowa zapisuje wybór metryk na urządzeniu. Po przyznaniu zgody może wyświetlić podgląd dziennych danych z Health Connect oraz diagnostykę źródeł kroków i kalorii. Nie zapisuje ani nie wysyła danych zdrowotnych. Synchronizacja z arkuszem jest w przygotowaniu.", modifier = Modifier.padding(24.dp)) } }
+        setContent { MaterialTheme { Text("Wersja rozwojowa zapisuje wybór metryk na urządzeniu. Po przyznaniu zgody może wyświetlić dane Health Connect i zapisać lokalnie dzienne wartości podczas importu. Nie wysyła jeszcze danych; synchronizacja z arkuszem jest w przygotowaniu.", modifier = Modifier.padding(24.dp)) } }
     }
 }

@@ -22,6 +22,8 @@ data class ImportCheckpoint(val metricId: String, val rangeStart: String, val ra
 @Entity
 data class UploadQueue(@PrimaryKey val date: String, val dirty: Boolean = true)
 
+data class ObservationSummary(val metricId: String, val earliestDate: String?, val dayCount: Int)
+
 @Dao
 abstract class ImportDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -39,8 +41,22 @@ abstract class ImportDao {
     @Query("SELECT * FROM ImportCheckpoint WHERE metricId = :metricId ORDER BY rangeStart")
     abstract suspend fun checkpoints(metricId: String): List<ImportCheckpoint>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM ImportCheckpoint WHERE metricId = :metricId AND rangeStart = :start AND rangeEndExclusive = :end)")
+    abstract suspend fun isCompleted(metricId: String, start: String, end: String): Boolean
+
+    @Query("DELETE FROM ImportCheckpoint WHERE metricId = :metricId AND rangeStart = :start AND rangeEndExclusive = :end")
+    abstract suspend fun invalidate(metricId: String, start: String, end: String)
+
+    @Transaction
+    open suspend fun invalidateRanges(metricIds: List<String>, ranges: List<Pair<String, String>>) {
+        for (metric in metricIds) for ((start, end) in ranges) invalidate(metric, start, end)
+    }
+
     @Query("SELECT * FROM UploadQueue ORDER BY date")
     abstract suspend fun queued(): List<UploadQueue>
+
+    @Query("SELECT metricId, MIN(date) AS earliestDate, COUNT(*) AS dayCount FROM DailyObservation GROUP BY metricId")
+    abstract suspend fun summaries(): List<ObservationSummary>
 
     /** Commit only successfully read values. Absence never deletes or overwrites previous values. */
     @Transaction
