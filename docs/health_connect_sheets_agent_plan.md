@@ -119,7 +119,7 @@ Przycisk **„Zaznacz wszystkie”** wybiera cały katalog dostępnych metryk MV
 
 - **Klucz logiczny:** `date` w formacie `YYYY-MM-DD`, ze stałą strefą czasu arkusza (`Europe/Warsaw` w MVP).
 - Jeden wiersz na dzień; wiersz przechowuje wartości różnych metryk; `null` to pusty element, nie `0` i nie napis `null`.
-- Podczas zmiany wyboru metryk dodawaj nowe, **stabilne** kolumny z registry. Nie przemieszczaj kolumn ani nie kasuj historii po odznaczeniu.
+- W zakładce `daily` automatycznie ukrywaj kolumny wyłączonych metryk, bez usuwania wartości i bez przemieszczania kolumn. Po włączeniu metryki dodaj brakującą kolumnę albo odkryj istniejącą; uzupełnij brakujące dostępne wartości z wybranego zakresu historii, a nie tylko z ostatnich 3 dni. Uwzględnij uprawnienia i checkpointy, a przy braku dostępu lub danych pokaż status i zachowaj istniejące wartości. Zmiany wyboru mają zostać zastosowane również wtedy, gdy kolejka danych jest pusta; zapewnij ponowienie po błędach i współpracę synchronizacji ręcznej z automatyczną. Nie zmieniaj kolumn dodanych przez użytkownika ani innych zakładek. Nowy arkusz powinien mieć tylko wybrane kolumny. Dodaj testy przełączania, pustej kolejki, ponowienia i uzupełniania historii.
 - Dla nowego dnia: `spreadsheets.values.append`; dla istniejącego: `values.update` / `values.batchUpdate`. Przed zapisem odczytaj obecne daty/wiersze i buduj indeks; nie polegaj na tym, że ostatnie append na pewno się nie udało po timeout.
 - **Idempotencja po awarii:** jeśli upload się udał, lecz aplikacja nie otrzymała odpowiedzi, ponów najpierw odczyt arkusza i aktualizację istniejącego wiersza zamiast ponownego append. Nie wolno produkować podwójnych dat.
 - Gdy aktualizujesz niepełny zestaw metryk, **nie czyść innych kolumn**. Wyjątkiem jest jawne ponowne przeliczenie aktywnej metryki, kiedy dane źródłowe usunięto: wtedy można wyczyścić jej wartość.
@@ -129,7 +129,7 @@ Przycisk **„Zaznacz wszystkie”** wybiera cały katalog dostępnych metryk MV
 ### 4.6. Synchronizacja cykliczna
 
 - WorkManager: domyślnie co **3 godziny** (`ExistingPeriodicWorkPolicy.UPDATE` lub aktualny odpowiednik). Użytkownik może zmienić interwał lub wyłączyć tło.
-- Każda synchronizacja przelicza **ostatnie 7–14 dni** dla aktywnych metryk; takie ponowne odczyty wychwytują opóźnione przesyłanie danych z opaski.
+- Każda synchronizacja przelicza **ostatnie 3 dni** dla aktywnych metryk; dane przychodzące z większym opóźnieniem wymagają szerszej rekonsyliacji lub importu ręcznego.
 - Co pewien czas wykonuj szerszą rekoncyliację (np. ostatnie 90 dni), jeśli jest dostępne wymagane uprawnienie; na MVP dopuszczalne jest uruchamianie tego ręcznie, ale musi istnieć **pełny import powtórny**.
 - Jeśli tło lub autoryzacja Google nie działa, zachowaj lokalną kolejkę synchronizacji, pokaż wyraźny status i spróbuj po przywróceniu warunków.
 - Nie obiecuj wyzwalania „od razu po pojawieniu się danych” w MVP.
@@ -173,7 +173,7 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 
 **M6. Testy i wydanie:** testy unit/instrumented, realny test na Pixelu, README konfiguracji Google Cloud, instrukcja instalacji i debug APK + podpisany release APK (bez sekretów i lokalnego keystore w repozytorium).
 
-**M7. Import historii z Google Takeout (wymagany):** osobna ścieżka uzupełniająca luki w Health Connect. Po wdrożeniu trwałego modelu danych i bezpiecznego zapisu do Sheets użytkownik wybiera lokalne archiwum Takeout lub wspierany zestaw plików przez systemowy selektor. Import działa lokalnie, porcjowo, z podglądem zakresów, mapowaniem formatów i licznikami błędów; nie wysyła surowego archiwum ani nie zapisuje go w repozytorium. Formaty i jednostki należy sprawdzić na danych testowych i wersji rzeczywistego eksportu za zgodą użytkownika. Zapisuj pochodzenie i datę importu, zachowaj brak danych jako null i nie sumuj tych samych pomiarów z różnych źródeł. Dane Health Connect mają pierwszeństwo dla danej metryki i dnia, ale dopiero po udanym odczycie: błąd lub brak zgody nie oznaczają braku danych. W przypadku niejednoznacznych lub różnych wartości pokaż konflikt przed zastąpieniem; import ma być wznawialny i idempotentny. Dodaj testy ponownego importu, konfliktów, częściowych archiwów, strefy czasu i błędnych plików. Nie obiecuj obsługi metryk bez ustalenia ich semantyki.
+**M7. Import historii z Google Takeout (wstrzymany):** Nie rozpoczynaj implementacji, dopóki użytkownik nie poprosi o nią ponownie. osobna ścieżka uzupełniająca luki w Health Connect. Po wdrożeniu trwałego modelu danych i bezpiecznego zapisu do Sheets użytkownik wybiera lokalne archiwum Takeout lub wspierany zestaw plików przez systemowy selektor. Import działa lokalnie, porcjowo, z podglądem zakresów, mapowaniem formatów i licznikami błędów; nie wysyła surowego archiwum ani nie zapisuje go w repozytorium. Formaty i jednostki należy sprawdzić na danych testowych i wersji rzeczywistego eksportu za zgodą użytkownika. Zapisuj pochodzenie i datę importu, zachowaj brak danych jako null i nie sumuj tych samych pomiarów z różnych źródeł. Dane Health Connect mają pierwszeństwo dla danej metryki i dnia, ale dopiero po udanym odczycie: błąd lub brak zgody nie oznaczają braku danych. W przypadku niejednoznacznych lub różnych wartości pokaż konflikt przed zastąpieniem; import ma być wznawialny i idempotentny. Dodaj testy ponownego importu, konfliktów, częściowych archiwów, strefy czasu i błędnych plików. Nie obiecuj obsługi metryk bez ustalenia ich semantyki.
 
 ## 7. Definicja ukończenia MVP (Definition of Done)
 
@@ -224,7 +224,7 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 
 | Ryzyko | Zalecane zachowanie |
 |---|---|
-| Historia nie jest w HC | Jasna informacja i alternatywa Takeout, nie „zero” |
+| Historia nie jest w HC | Jasna informacja o luce, nie „zero”; Takeout dopiero na prośbę użytkownika |
 | Historia/tło nieobsługiwane przez urządzenie | Wykrycie przez flagę i fallback, brak fałszywego sukcesu |
 | Google Health nie zapisuje aktywnych kcal | Metryka opcjonalna, brak danych oznaczony jako pusty |
 | Opóźnienie synchronizacji opaski | Reagregacja ostatnich dni |

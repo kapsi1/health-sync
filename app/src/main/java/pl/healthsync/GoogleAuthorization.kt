@@ -29,8 +29,8 @@ import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SheetState
 import pl.healthsync.data.SheetsCreator
 
-private const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
-private val syncLock = Mutex()
+internal const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+internal val syncLock = Mutex()
 
 @Composable
 fun GoogleAuthorization(activity: Activity, selected: Set<String>) {

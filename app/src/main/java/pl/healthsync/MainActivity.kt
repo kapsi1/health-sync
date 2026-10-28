@@ -60,6 +60,8 @@ class MainActivity : ComponentActivity() {
         val importer = remember(client) { client?.let { HistoryImport(HealthHistorySource(it), RoomHistoryStore(SyncDatabase.get(applicationContext).importDao())) } }
         val selections = remember { MetricSelection(applicationContext) }
         val selected by selections.selected.collectAsState(initial = emptySet())
+        val backgroundSettings = remember { BackgroundSettings(applicationContext) }
+        val background by backgroundSettings.state.collectAsState(initial = BackgroundState(0, "Sprawdzanie ustawień…"))
         var granted by remember { mutableStateOf(emptySet<String>()) }
         val lifecycle = LocalLifecycleOwner.current.lifecycle
         DisposableEffect(lifecycle, client) {
@@ -174,6 +176,19 @@ class MainActivity : ComponentActivity() {
                 OutlinedButton(onClick = { startImport(true) }, enabled = historyJob == null) { Text("Importuj ponownie") }
                 Text(historyStatus)
                 GoogleAuthorization(this@MainActivity, selected)
+                Text("Synchronizacja automatyczna", style = MaterialTheme.typography.titleLarge)
+                Text("W tle aktualizuje ostatnie 3 dni i wysyła kolejkę. Wymaga zgody na odczyt w tle i dostępu Google. Android może opóźnić uruchomienie.")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(0 to "Wył.", 1 to "1 h", 3 to "3 h", 12 to "12 h", 24 to "24 h").forEach { (hours, label) ->
+                        TextButton(enabled = background.hours != hours, onClick = { scope.launch { backgroundSettings.configure(hours) } }) { Text(label) }
+                    }
+                }
+                Text(if (background.hours == 0) "Automatyczna synchronizacja: wyłączona." else "Automatyczna synchronizacja: co ${background.hours} godz.")
+                Text(background.status)
+                if (background.log.isNotEmpty()) {
+                    Text("Historia synchronizacji", style = MaterialTheme.typography.titleMedium)
+                    background.log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
                 Text("Diagnostyka", style = MaterialTheme.typography.titleLarge)
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY)) { Text("Zezwól na starszą historię") }
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND)) { Text("Zezwól na odczyt w tle") }

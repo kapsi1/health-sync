@@ -31,10 +31,11 @@ interface HistoryStore {
     suspend fun commit(metricId: String, range: DateChunk, rows: List<ImportedValue>)
 }
 
-class HistoryImport(private val source: HistorySource, private val store: HistoryStore, private val today: () -> LocalDate = { LocalDate.now(java.time.ZoneId.of("Europe/Warsaw")) }) {
-    private val mutex = Mutex()
+private val historyImportLock = Mutex()
 
-    suspend fun run(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate, refresh: Boolean, progress: (ImportProgress) -> Unit) = mutex.withLock {
+class HistoryImport(private val source: HistorySource, private val store: HistoryStore, private val today: () -> LocalDate = { LocalDate.now(java.time.ZoneId.of("Europe/Warsaw")) }) {
+
+    suspend fun run(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate, refresh: Boolean, progress: (ImportProgress) -> Unit) = historyImportLock.withLock {
         require(metricIds.isNotEmpty() && metricIds.distinct().size == metricIds.size)
         val ranges = chunks(start, endExclusive)
         val total = metricIds.size * ranges.size
