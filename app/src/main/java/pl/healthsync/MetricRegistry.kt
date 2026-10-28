@@ -15,5 +15,6 @@ object MetricRegistry {
         Metric("resting_heart_rate", "Tętno spoczynkowe", "ud./min", "Serce", "resting_hr_bpm", HealthPermission.getReadPermission(RestingHeartRateRecord::class)),
         Metric("sleep_duration", "Czas snu", "godz.", "Sen", "sleep_hours", HealthPermission.getReadPermission(SleepSessionRecord::class)),
         Metric("weight_avg", "Średnia masa ciała", "kg", "Ciało", "weight_avg_kg", HealthPermission.getReadPermission(WeightRecord::class)),
+        Metric("body_fat", "Tkanka tłuszczowa — ostatni pomiar", "%", "Ciało", "body_fat_percent", HealthPermission.getReadPermission(BodyFatRecord::class)),
     )
 }

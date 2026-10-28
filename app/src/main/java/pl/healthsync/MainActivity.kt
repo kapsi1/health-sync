@@ -41,6 +41,8 @@ class MainActivity : ComponentActivity() {
         val status = remember { HealthConnectClient.getSdkStatus(this) }
         val client = remember(status) { if (status == HealthConnectClient.SDK_AVAILABLE) HealthConnectClient.getOrCreate(this) else null }
         var result by remember { mutableStateOf("Naciśnij „Sprawdź”, aby odczytać status i dostępność danych.") }
+        var preview by remember { mutableStateOf("") }
+        var reading by remember { mutableStateOf(false) }
         val selections = remember { MetricSelection(applicationContext) }
         val selected by selections.selected.collectAsState(initial = emptySet())
         var granted by remember { mutableStateOf(emptySet<String>()) }
@@ -81,13 +83,28 @@ class MainActivity : ComponentActivity() {
                             })
                             Column(Modifier.padding(top = 8.dp)) {
                                 Text("${metric.label} (${metric.unit})")
-                                Text(if (metric.permission in granted) "Zgoda przyznana · odczyt w przygotowaniu" else "Wymaga zgody na odczyt", style = MaterialTheme.typography.bodySmall)
+                                Text(if (metric.permission in granted) "Zgoda przyznana" else "Wymaga zgody na odczyt", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
                 }
                 val missing = MetricRegistry.all.filter { it.id in selected && it.permission !in granted }.map { it.permission }.toSet()
                 Button(onClick = { launcher.launch(missing) }, enabled = missing.isNotEmpty()) { Text("Przyznaj brakujące zgody") }
+                Button(onClick = {
+                    scope.launch {
+                        reading = true
+                        try {
+                            val current = client.permissionController.getGrantedPermissions()
+                            granted = current
+                            preview = DailyPreview(client).read(selected, current)
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            preview = "Nie udało się odczytać danych (${e.javaClass.simpleName})."
+                        } finally { reading = false }
+                    }
+                }, enabled = !reading && selected.isNotEmpty()) { Text(if (reading) "Odczyt..." else "Podgląd ostatnich 7 dni") }
+                if (preview.isNotEmpty()) Text(preview)
                 Text("Diagnostyka", style = MaterialTheme.typography.titleLarge)
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY)) { Text("Zezwól na starszą historię") }
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND)) { Text("Zezwól na odczyt w tle") }
@@ -122,6 +139,6 @@ private suspend fun diagnose(client: HealthConnectClient): String = try {
 class PrivacyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { Text("Wersja rozwojowa zapisuje wybór metryk na urządzeniu. Po przyznaniu zgody diagnostyka odczytuje próbkę kroków i całkowitych kalorii z Health Connect i pokazuje jedynie obecność rekordów oraz nazwy pakietów źródeł. Nie zapisuje ani nie wysyła danych zdrowotnych. Pozostałe metryki i synchronizacja z arkuszem są w przygotowaniu.", modifier = Modifier.padding(24.dp)) } }
+        setContent { MaterialTheme { Text("Wersja rozwojowa zapisuje wybór metryk na urządzeniu. Po przyznaniu zgody może wyświetlić podgląd dziennych danych z Health Connect oraz diagnostykę źródeł kroków i kalorii. Nie zapisuje ani nie wysyła danych zdrowotnych. Synchronizacja z arkuszem jest w przygotowaniu.", modifier = Modifier.padding(24.dp)) } }
     }
 }

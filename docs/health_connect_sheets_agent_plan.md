@@ -171,6 +171,8 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 
 **M6. Testy i wydanie:** testy unit/instrumented, realny test na Pixelu, README konfiguracji Google Cloud, instrukcja instalacji i debug APK + podpisany release APK (bez sekretów i lokalnego keystore w repozytorium).
 
+**M7. Import historii z Google Takeout (wymagany):** osobna ścieżka uzupełniająca luki w Health Connect. Po wdrożeniu trwałego modelu danych i bezpiecznego zapisu do Sheets użytkownik wybiera lokalne archiwum Takeout lub wspierany zestaw plików przez systemowy selektor. Import działa lokalnie, porcjowo, z podglądem zakresów, mapowaniem formatów i licznikami błędów; nie wysyła surowego archiwum ani nie zapisuje go w repozytorium. Formaty i jednostki należy sprawdzić na danych testowych i wersji rzeczywistego eksportu za zgodą użytkownika. Zapisuj pochodzenie i datę importu, zachowaj brak danych jako null i nie sumuj tych samych pomiarów z różnych źródeł. Dane Health Connect mają pierwszeństwo dla danej metryki i dnia, ale dopiero po udanym odczycie: błąd lub brak zgody nie oznaczają braku danych. W przypadku niejednoznacznych lub różnych wartości pokaż konflikt przed zastąpieniem; import ma być wznawialny i idempotentny. Dodaj testy ponownego importu, konfliktów, częściowych archiwów, strefy czasu i błędnych plików. Nie obiecuj obsługi metryk bez ustalenia ich semantyki.
+
 ## 7. Definicja ukończenia MVP (Definition of Done)
 
 - [ ] Zainstalowany APK na Pixelu 7a odczytuje rzeczywiste dane z Health Connect.
@@ -208,7 +210,7 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 - Osobny przycisk **„Eksportuj wszystkie dostępne rekordy”** z wyborem kategorii, okresu i lokalizacji (CSV/JSON/ZIP na telefonie; opcjonalnie Google Drive).
 - Paginowany streaming `readRecords`, metadane źródła i znaczniki czasu, stabilne ID do deduplikacji, checkpointy, poprawna obsługa serii (np. wiele pomiarów tętna na minutę).
 - Oddzielny format/zakładki od `daily` i jawne ostrzeżenie o rozmiarze oraz wrażliwości danych.
-- Jeżeli wymagany jest dostęp do pełnej historii Google Health istniejącej **wyłącznie w chmurze**, rozważ import Google Takeout jako **oddzielną ścieżkę**, nie przypisuj jej możliwości Health Connect.
+- Import Google Takeout jako oddzielna ścieżka jest wymagany w M7; nie przypisuj jego danych możliwościom Health Connect.
 
 ### P4. Dashboard i analiza
 
