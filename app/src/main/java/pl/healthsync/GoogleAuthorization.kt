@@ -22,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.first
 import pl.healthsync.data.SyncDatabase
 import pl.healthsync.data.SheetGatewayHttp
 import pl.healthsync.data.RoomPendingQueue
@@ -32,6 +33,8 @@ import pl.healthsync.data.SheetHttpError
 import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SheetState
 import pl.healthsync.data.SheetsCreator
+import pl.healthsync.data.SelectedMetricBackfill
+import androidx.health.connect.client.HealthConnectClient
 
 internal const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 internal val syncLock = Mutex()
@@ -85,7 +88,11 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                     val database = SyncDatabase.get(activity.applicationContext)
                     val gateway = SheetGatewayHttp(sheetId, token)
                     syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), MetricRegistry.all.filter { it.id in selectedSnapshot }.map { it.column }.toSet()) }
-                    val sync = SheetSync(gateway, RoomPendingQueue(database.importDao(), selectedSnapshot), syncLock)
+                    if (selectedSnapshot.isNotEmpty()) {
+                        val client = HealthConnectClient.getOrCreate(activity.applicationContext)
+                        SelectedMetricBackfill(activity.applicationContext, client, database.importDao()).run(selectedSnapshot) { status = it }
+                    }
+                    val sync = SheetSync(gateway, RoomPendingQueue(database.importDao(), selectedSnapshot) { MetricSelection(activity.applicationContext).selected.first() }, syncLock)
                     var total = 0
                     var rounds = 0
                     do {
@@ -99,6 +106,8 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                 } catch (e: CancellationException) { throw e }
                 catch (e: SheetHttpError) {
                     status = if (e.code == 401 || e.code == 403) "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto." else "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
+                } catch (e: IllegalStateException) {
+                    status = "Nie ukończono synchronizacji: ${e.message ?: "sprawdź dostęp do danych"}. Zapisane dane zostały zachowane."
                 } catch (_: Exception) {
                     status = "Synchronizacja zatrzymana. Sprawdź sieć i unikalność dat w arkuszu; kolejka została zachowana."
                 } finally { busy = false }
@@ -162,7 +171,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
     Column {
         Text("Google Sheets", style = MaterialTheme.typography.titleLarge)
         Text("Utworzenie arkusza dodaje nagłówki. Wysłanie danych zapisuje wybrane statystyki w Twoim arkuszu.")
-        Text("Widoczność kolumn jest aktualizowana podczas wysyłania danych. Starszą historię nowo wybranych statystyk należy na razie zaimportować ręcznie.")
+        Text("Widoczność kolumn i historia nowo wybranych statystyk są aktualizowane podczas synchronizacji.")
         OutlinedButton(enabled = !busy, onClick = { authorize("check") }) { Text("Sprawdź zgodę Google") }
         when (val state: SheetState? = sheet) {
             null -> Text("Sprawdzanie ustawień arkusza…")

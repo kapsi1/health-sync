@@ -74,6 +74,12 @@ abstract class ImportDao {
     @Query("SELECT metricId, MIN(date) AS earliestDate, COUNT(*) AS dayCount FROM DailyObservation GROUP BY metricId")
     abstract suspend fun summaries(): List<ObservationSummary>
 
+    @Query("SELECT MIN(rangeStart) FROM ImportCheckpoint")
+    abstract suspend fun earliestImportedStart(): String?
+
+    @Query("INSERT OR REPLACE INTO UploadQueue(date, dirty) SELECT date, 1 FROM DailyObservation WHERE metricId = :metricId")
+    abstract suspend fun queueMetric(metricId: String)
+
     /** Commit only successfully read values. Absence never deletes or overwrites previous values. */
     @Transaction
     open suspend fun commitChunk(checkpoint: ImportCheckpoint, rows: List<DailyObservation>) {

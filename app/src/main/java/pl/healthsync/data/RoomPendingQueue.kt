@@ -7,8 +7,9 @@ import pl.healthsync.domain.PendingSheetDay
 import java.time.LocalDate
 import java.security.MessageDigest
 
-class RoomPendingQueue(private val dao: ImportDao, private val active: Set<String>) : PendingQueue {
+class RoomPendingQueue(private val dao: ImportDao, private val active: Set<String>, private val currentSelection: suspend () -> Set<String> = { active }) : PendingQueue {
     override suspend fun snapshot(limit: Int): PendingBatch {
+        check(currentSelection() == active) { "Wybór statystyk zmienił się podczas synchronizacji; uruchom ją ponownie" }
         if (active.isEmpty()) return PendingBatch(emptyList())
         val mapping = MetricRegistry.all.filter { it.id in active }.associate { it.id to it.column }
         val dates = dao.queuedDates(mapping.keys.toList(), limit)
@@ -21,6 +22,7 @@ class RoomPendingQueue(private val dao: ImportDao, private val active: Set<Strin
     }
 
     override suspend fun acknowledge(batch: PendingBatch) {
+        check(currentSelection() == active) { "Wybór statystyk zmienił się podczas synchronizacji; uruchom ją ponownie" }
         for (row in batch.rows) {
             val current = dao.observationsForDate(row.date.toString())
             if (revision(current) == row.revision) dao.acknowledgeIfUnchanged(row.date.toString(), current)

@@ -30,6 +30,7 @@ import pl.healthsync.data.SheetGatewayHttp
 import pl.healthsync.data.SheetHttpError
 import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SyncDatabase
+import pl.healthsync.data.SelectedMetricBackfill
 import pl.healthsync.domain.HistoryImport
 import pl.healthsync.domain.SheetSync
 import java.io.IOException
@@ -85,6 +86,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             if (metrics.any { it.permission !in granted }) { settings.status("Brakuje zgód Health Connect dla wybranych statystyk."); return Result.success() }
             val db = SyncDatabase.get(applicationContext)
             val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+            SelectedMetricBackfill(applicationContext, client, db.importDao()).run(selected)
             if (metrics.isNotEmpty()) HistoryImport(HealthHistorySource(client), RoomHistoryStore(db.importDao())).run(metrics.map { it.id }, today.minusDays(2), today.plusDays(1), true) {}
             val sheetId = SheetSettings(applicationContext).state.first().id
             if (sheetId == null) { settings.status("Dane zapisano lokalnie. Utwórz arkusz Google w aplikacji."); return Result.success() }
@@ -92,7 +94,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             if (token == null) { settings.status("Dane zapisano lokalnie. Otwórz aplikację i ponownie przyznaj zgodę Google."); return Result.success() }
             val gateway = SheetGatewayHttp(sheetId, token)
             syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), metrics.map { it.column }.toSet()) }
-            val sync = SheetSync(gateway, RoomPendingQueue(db.importDao(), selected), syncLock)
+            val sync = SheetSync(gateway, RoomPendingQueue(db.importDao(), selected) { MetricSelection(applicationContext).selected.first() }, syncLock)
             var total = 0
             repeat(10) {
                 val count = sync.uploadBatch()
@@ -110,6 +112,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             settings.status("Błąd Google Sheets (${e.code}); kolejka jest zachowana.")
             return if (e.code == 429 || e.code >= 500) Result.retry() else Result.success()
         } catch (_: IOException) { settings.status("Brak połączenia. Dane lokalne i kolejka są zachowane; ponowimy próbę."); return Result.retry() }
+        catch (e: IllegalStateException) { settings.status("Nie ukończono importu historii: ${e.message ?: "sprawdź zgody Health Connect"}. Przy kolejnej próbie import zostanie wznowiony."); return Result.success() }
         catch (_: Exception) { settings.status("Synchronizacja zatrzymana. Otwórz aplikację i sprawdź zgody oraz dane."); return Result.success() }
     }
 

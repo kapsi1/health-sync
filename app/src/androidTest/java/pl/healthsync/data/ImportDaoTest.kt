@@ -58,6 +58,26 @@ class ImportDaoTest {
         assertTrue(dao.queued().isEmpty())
     }
 
+    @Test fun enablingMetricQueuesSavedHistoryAgain() = runTest {
+        dao.commitChunk(checkpoint, listOf(row))
+        val queue = RoomPendingQueue(dao, setOf("steps"))
+        queue.acknowledge(queue.snapshot(10))
+        assertTrue(dao.queued().isEmpty())
+        assertEquals("2026-10-01", dao.earliestImportedStart())
+        dao.queueMetric("steps")
+        assertEquals(0.0, queue.snapshot(10).rows.single().cells.getValue("steps"), 0.0)
+    }
+
+    @Test fun changedSelectionDoesNotAcknowledgeOldUpload() = runTest {
+        dao.commitChunk(checkpoint, listOf(row))
+        var current = setOf("steps")
+        val queue = RoomPendingQueue(dao, setOf("steps")) { current }
+        val before = queue.snapshot(10)
+        current = setOf("steps", "weight_avg")
+        try { queue.acknowledge(before); fail("Expected changed selection") } catch (_: IllegalStateException) { }
+        assertEquals(1, dao.queued().size)
+    }
+
     @Test fun modifiedDataRemainsInQueueAfterEarlierSnapshotWasUploaded() = runTest {
         dao.commitChunk(checkpoint, listOf(row))
         val queue = RoomPendingQueue(dao, setOf("steps"))
