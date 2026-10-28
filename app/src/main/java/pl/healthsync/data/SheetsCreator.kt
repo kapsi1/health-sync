@@ -12,8 +12,8 @@ data class CreatedSheet(val id: String, val url: String)
 class SheetHttpError(val code: Int) : Exception("HTTP $code")
 
 class SheetsCreator {
-    suspend fun create(token: String): CreatedSheet = withContext(Dispatchers.IO) {
-        val body = createSheetPayload()
+    suspend fun create(token: String, selected: Set<String>): CreatedSheet = withContext(Dispatchers.IO) {
+        val body = createSheetPayload(selected)
         val conn = (URL("https://sheets.googleapis.com/v4/spreadsheets?fields=spreadsheetId,spreadsheetUrl").openConnection() as HttpURLConnection)
         try {
             conn.requestMethod = "POST"
@@ -34,8 +34,8 @@ class SheetsCreator {
     }
 }
 
-internal fun createSheetPayload(): JSONObject {
-    val headers = listOf("date") + MetricRegistry.all.map { it.column }
+internal fun createSheetPayload(selected: Set<String>): JSONObject {
+    val headers = listOf("date") + MetricRegistry.all.filter { it.id in selected }.map { it.column }
     val values = JSONArray()
     headers.forEach { values.put(JSONObject().put("userEnteredValue", JSONObject().put("stringValue", it))) }
     val sheet = JSONObject()

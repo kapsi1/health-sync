@@ -101,7 +101,7 @@ Przycisk **„Zaznacz wszystkie”** wybiera cały katalog dostępnych metryk MV
 
 1. Sprawdź dostępność HC i flag historii / działania w tle; przejdź do odpowiednich ustawień, jeśli konieczne.
 2. Użytkownik wybiera metryki i przyznaje **wyłącznie potrzebne** uprawnienia HC; osobno zatwierdza historię oraz tło.
-3. Autoryzuje konto Google do pracy z arkuszem. Aplikacja tworzy nowy arkusz `Health Connect – Daily Sync` przez Sheets API. Zapisz `spreadsheetId` i URL; w MVP **nie trzeba** obsługiwać dowolnych istniejących arkuszy.
+3. Autoryzuje konto Google do pracy z arkuszem. Aplikacja tworzy nowy arkusz `Health Connect – Daily Sync` przez Sheets API albo umożliwia ponowne podłączenie istniejącego arkusza za pomocą ID lub URL. Zapisz `spreadsheetId` i URL; przed podłączeniem sprawdź dostęp oraz strukturę `daily` i nie zmieniaj istniejących danych.
 4. Utwórz `daily` z nagłówkiem `date`, stabilnymi nazwami kolumn metryk, opcjonalnym `synced_at_utc` i wersją schematu (metadane nie powinny być przypadkowo traktowane jak metryki).
 5. Rozpocznij pełny import wybranych metryk, pokaż prawdziwy postęp i umożliwiaj przerwanie oraz wznowienie.
 
@@ -196,6 +196,9 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 ### P1. Pełniejsza synchronizacja zmian i korekt historycznych
 
 - `getChangesToken` i `getChanges` z osobnym tokenem per typ danych (gdy potrzebne do wykrycia dat zmienionych i usuniętych pomiarów).
+- Okresowo sprawdzaj zmiany także dla wagi i tkanki tłuszczowej; nowy lub poprawiony pomiar może dotyczyć dowolnej starszej daty, więc przelicz odpowiedni dzień i umieść go w kolejce. Changes API nie wyzwala powiadomienia i nie zastępuje zaplanowanego sprawdzania.
+- Obsłuż usunięcia przez bezpieczne mapowanie identyfikatora rekordu na typ i datę; po potwierdzonym przeliczeniu usuń wartość z arkusza tylko wtedy, gdy nie ma już poprawnego pomiaru dla danego dnia. Nie uznawaj błędu ani braku zgody za usunięcie. Mapowanie ma przechowywać minimum metadanych, nie szczegółowe pomiary.
+- Postęp pobierania zmian i kolejkę zapisuj trwale tak, by awaria, paginacja, ponowienie lub brak sieci nie gubiły zmian ani nie tworzyły duplikatów. Po utracie danych aplikacji lub wygaśnięciu tokenu wykonaj bezpieczną rekonsyliację, uwzględniając możliwy brak starszych danych w Health Connect. Dodaj testy późnego wpisu, zmiany, usunięcia, wygaśnięcia tokenu, restartu oraz cofnięcia zgody.
 - Tokeny zmian mają ograniczony okres ważności (dokumentacja podaje 30 dni); po wygaśnięciu pełne przeliczenie odpowiedniego zakresu.
 - Przenośne mapowanie zmienionego/usuniętego rekordu na **dzień źródłowy**; regularna weryfikacja wybranych starszych okresów, nie tylko ostatniego tygodnia.
 - Powiadomienia Android o awariach wymagających uwagi, bez ujawniania wrażliwych liczb na ekranie blokady.
@@ -215,7 +218,7 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 
 ### P5. Wygoda i utrzymanie
 
-- Wybór **istniejącego** arkusza przez bezpieczny Picker przy scope `drive.file`, migracje schematu i kilku arkuszy.
+- Podłączenie istniejącego arkusza przez wpisanie ID lub URL, w tym po wyczyszczeniu danych aplikacji. Sprawdź dostęp `drive.file` i umożliwiaj przyznanie dostępu do konkretnego pliku przez bezpieczny Google Picker, gdy samo ID nie wystarczy. Przed zapisem sprawdź strukturę `daily`, unikalność dat i nagłówki; nie kasuj istniejących wartości ani innych zakładek. Testuj ponowne podłączenie po utracie lokalnych ustawień, import historii i idempotentną synchronizację oraz odmowę dostępu. Migracje schematu i kilka arkuszy jako dalsze rozszerzenie.
 - Harmonogram tylko przez Wi-Fi, tylko podczas ładowania, zmienna częstotliwość, przycisk pełnej rekonsyliacji.
 - Diagnostyka konfliktów, zmiana strefy czasu z kontrolowaną przebudową dat (bez duplikatów), polityka retencji lokalnych danych.
 - Opcjonalny podział na profile i synchronizację z innymi backendami, ale bez komplikowania MVP.

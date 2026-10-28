@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -20,10 +21,13 @@ import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import pl.healthsync.data.SyncDatabase
 import pl.healthsync.data.SheetGatewayHttp
 import pl.healthsync.data.RoomPendingQueue
 import pl.healthsync.domain.SheetSync
+import pl.healthsync.domain.planSheetMerge
+import pl.healthsync.domain.spreadsheetId
 import pl.healthsync.data.SheetHttpError
 import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SheetState
@@ -37,6 +41,9 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
     var status by remember { mutableStateOf("Nie sprawdzono. Wymaga konfiguracji Google Cloud.") }
     var busy by remember { mutableStateOf(false) }
     var action by rememberSaveable { mutableStateOf("check") }
+    var sheetReference by rememberSaveable { mutableStateOf("") }
+    var pendingSheetId by rememberSaveable { mutableStateOf("") }
+    var showSheetCheck by rememberSaveable { mutableStateOf(false) }
     val settings = remember { SheetSettings(activity.applicationContext) }
     val sheet by settings.state.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -44,15 +51,41 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
 
     fun authorized(token: String?) {
         if (token.isNullOrBlank()) { busy = false; status = "Nie otrzymano tokenu."; return }
+        if (action == "attach") {
+            val id = pendingSheetId
+            scope.launch {
+                try {
+                    syncLock.withLock {
+                        val snapshot = SheetGatewayHttp(id, token).snapshot()
+                        planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())
+                        settings.save(id, "https://docs.google.com/spreadsheets/d/$id/edit")
+                    }
+                    status = "Podłączono arkusz. Zaimportuj dane i uruchom synchronizację."
+                } catch (e: CancellationException) { throw e }
+                catch (e: SheetHttpError) {
+                    status = when (e.code) {
+                        401, 403 -> "Brak dostępu do tego arkusza (HTTP ${e.code}). Wpisanie ID nie przyznaje dostępu; wybór pliku przez Google Picker jest w przygotowaniu."
+                        400, 404 -> "Nie znaleziono arkusza lub zakładki daily (HTTP ${e.code}). Sprawdź ID i strukturę."
+                        else -> "Nie udało się sprawdzić arkusza (HTTP ${e.code}). Spróbuj ponownie."
+                    }
+                } catch (_: IllegalArgumentException) {
+                    status = "Arkusz ma nieprawidłowy nagłówek lub daty. Sprawdź zakładkę daily, jej pierwszą kolumnę i unikalność dat."
+                } catch (_: Exception) {
+                    status = "Nie udało się sprawdzić arkusza. Sprawdź połączenie i spróbuj ponownie."
+                } finally { busy = false }
+            }
+            return
+        }
         if (action == "sync") {
             val sheetId = sheet?.id
             if (sheetId == null) { busy = false; status = "Nie wybrano arkusza."; return }
-            if (selected.isEmpty()) { busy = false; status = "Wybierz przynajmniej jedną statystykę."; return }
             val selectedSnapshot = selected.toSet()
             scope.launch {
                 try {
                     val database = SyncDatabase.get(activity.applicationContext)
-                    val sync = SheetSync(SheetGatewayHttp(sheetId, token), RoomPendingQueue(database.importDao(), selectedSnapshot), syncLock)
+                    val gateway = SheetGatewayHttp(sheetId, token)
+                    syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), MetricRegistry.all.filter { it.id in selectedSnapshot }.map { it.column }.toSet()) }
+                    val sync = SheetSync(gateway, RoomPendingQueue(database.importDao(), selectedSnapshot), syncLock)
                     var total = 0
                     var rounds = 0
                     do {
@@ -78,7 +111,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
             try {
                 settings.markPending()
                 marked = true
-                val created = SheetsCreator().create(token)
+                val created = SheetsCreator().create(token, selected.toSet())
                 settings.save(created.id, created.url)
                 status = "Arkusz utworzony. Synchronizacja danych jest w przygotowaniu."
             } catch (e: CancellationException) {
@@ -129,6 +162,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
     Column {
         Text("Google Sheets", style = MaterialTheme.typography.titleLarge)
         Text("Utworzenie arkusza dodaje nagłówki. Wysłanie danych zapisuje wybrane statystyki w Twoim arkuszu.")
+        Text("Widoczność kolumn jest aktualizowana podczas wysyłania danych. Starszą historię nowo wybranych statystyk należy na razie zaimportować ręcznie.")
         OutlinedButton(enabled = !busy, onClick = { authorize("check") }) { Text("Sprawdź zgodę Google") }
         when (val state: SheetState? = sheet) {
             null -> Text("Sprawdzanie ustawień arkusza…")
@@ -136,11 +170,23 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                 state.id != null && state.url != null -> {
                     Text("Arkusz: Health Connect – Daily Sync")
                     OutlinedButton(onClick = { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(state.url))) }) { Text("Otwórz arkusz") }
-                    Button(enabled = !busy && selected.isNotEmpty(), onClick = { authorize("sync") }) { Text("Wyślij zapisane dane") }
+                    Button(enabled = !busy, onClick = { authorize("sync") }) { Text("Wyślij zapisane dane") }
+                    OutlinedButton(enabled = !busy, onClick = { showSheetCheck = !showSheetCheck }) { Text("Sprawdź podłączenie arkusza") }
                 }
-                state.creationPending -> Text("Poprzednia próba mogła utworzyć arkusz. Sprawdź Dysk Google — kolejna próba jest wstrzymana, aby uniknąć duplikatu.")
-                else -> Button(enabled = !busy, onClick = { authorize("create") }) { Text("Utwórz arkusz") }
+                else -> {
+                    if (state.creationPending) Text("Poprzednia próba mogła utworzyć arkusz. Sprawdź Dysk Google — kolejna próba jest wstrzymana, aby uniknąć duplikatu.")
+                    else Button(enabled = !busy, onClick = { authorize("create") }) { Text("Utwórz arkusz") }
+                }
             }
+        }
+        if (sheet != null && (sheet?.id == null || showSheetCheck)) {
+            OutlinedTextField(value = sheetReference, onValueChange = { sheetReference = it }, label = { Text("ID lub link istniejącego arkusza") }, singleLine = true, enabled = !busy)
+            OutlinedButton(enabled = !busy, onClick = {
+                val id = spreadsheetId(sheetReference)
+                if (id == null) status = "Podaj poprawne ID lub link arkusza Google Sheets."
+                else if (sheet?.id != null && sheet?.id != id) status = "Aplikacja ma już podłączony inny arkusz. Zmiana arkusza jest w przygotowaniu."
+                else { pendingSheetId = id; authorize("attach") }
+            }) { Text(if (sheet?.id == null) "Podłącz istniejący arkusz" else "Sprawdź arkusz") }
         }
         Text(status)
     }

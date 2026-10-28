@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import pl.healthsync.data.HealthHistorySource
 import pl.healthsync.data.RoomHistoryStore
 import pl.healthsync.data.RoomPendingQueue
@@ -81,16 +82,17 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             }
             val selected = MetricSelection(applicationContext).selected.first()
             val metrics = MetricRegistry.all.filter { it.id in selected }
-            if (metrics.isEmpty()) { settings.status("Wybierz statystyki do synchronizacji."); return Result.success() }
             if (metrics.any { it.permission !in granted }) { settings.status("Brakuje zgód Health Connect dla wybranych statystyk."); return Result.success() }
             val db = SyncDatabase.get(applicationContext)
             val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
-            HistoryImport(HealthHistorySource(client), RoomHistoryStore(db.importDao())).run(metrics.map { it.id }, today.minusDays(2), today.plusDays(1), true) {}
+            if (metrics.isNotEmpty()) HistoryImport(HealthHistorySource(client), RoomHistoryStore(db.importDao())).run(metrics.map { it.id }, today.minusDays(2), today.plusDays(1), true) {}
             val sheetId = SheetSettings(applicationContext).state.first().id
             if (sheetId == null) { settings.status("Dane zapisano lokalnie. Utwórz arkusz Google w aplikacji."); return Result.success() }
             val token = googleToken()
             if (token == null) { settings.status("Dane zapisano lokalnie. Otwórz aplikację i ponownie przyznaj zgodę Google."); return Result.success() }
-            val sync = SheetSync(SheetGatewayHttp(sheetId, token), RoomPendingQueue(db.importDao(), selected), syncLock)
+            val gateway = SheetGatewayHttp(sheetId, token)
+            syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), metrics.map { it.column }.toSet()) }
+            val sync = SheetSync(gateway, RoomPendingQueue(db.importDao(), selected), syncLock)
             var total = 0
             repeat(10) {
                 val count = sync.uploadBatch()

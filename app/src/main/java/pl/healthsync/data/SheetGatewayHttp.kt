@@ -8,6 +8,8 @@ import pl.healthsync.domain.SheetCellUpdate
 import pl.healthsync.domain.SheetGateway
 import pl.healthsync.domain.SheetNewRow
 import pl.healthsync.domain.SheetSnapshot
+import pl.healthsync.domain.planColumnVisibility
+import pl.healthsync.domain.planSheetMerge
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -15,19 +17,52 @@ import java.net.URLEncoder
 /** One gateway instance is used for one serialized batch. Never logs credentials or responses. */
 class SheetGatewayHttp(private val spreadsheetId: String, private val token: String) : SheetGateway {
     private var headerCount = 0
-    private val base = "https://sheets.googleapis.com/v4/spreadsheets/${encode(spreadsheetId)}/values"
+    private var hasUnlabeledData = false
+    private val spreadsheet = "https://sheets.googleapis.com/v4/spreadsheets/${encode(spreadsheetId)}"
+    private val base = "$spreadsheet/values"
+
+    suspend fun reconcileColumns(known: Set<String>, selected: Set<String>) {
+        val snapshot = snapshot()
+        planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())
+        require(selected.all { it in known })
+        val missing = selected.filterNot { it in snapshot.headers }.sorted()
+        if (missing.isNotEmpty()) {
+            check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
+            addColumns(missing)
+        }
+        val visibility = planColumnVisibility(snapshot.headers + missing, known, selected)
+        if (visibility.isEmpty()) return
+        val meta = call("GET", "$spreadsheet?fields=${encode("sheets.properties(sheetId,title)")}")
+        val sheets = meta.getJSONArray("sheets")
+        val daily = (0 until sheets.length()).map { sheets.getJSONObject(it).getJSONObject("properties") }
+            .single { it.getString("title") == "daily" }
+        val sheetId = daily.getInt("sheetId")
+        val requests = JSONArray()
+        visibility.forEach { item ->
+            val range = JSONObject().put("sheetId", sheetId).put("dimension", "COLUMNS")
+                .put("startIndex", item.index).put("endIndex", item.index + 1)
+            val properties = JSONObject().put("hiddenByUser", item.hidden)
+            requests.put(JSONObject().put("updateDimensionProperties", JSONObject().put("range", range).put("properties", properties).put("fields", "hiddenByUser")))
+        }
+        call("POST", "$spreadsheet:batchUpdate", JSONObject().put("requests", requests))
+    }
 
     override suspend fun snapshot(): SheetSnapshot {
         val json = call("GET", "${base}/${encode("'daily'")}")
         val rows = json.optJSONArray("values") ?: JSONArray()
         val header = if (rows.length() == 0) emptyList() else rows.getJSONArray(0).let { a -> (0 until a.length()).map { a.optString(it, "") } }
         headerCount = header.size
+        hasUnlabeledData = (1 until rows.length()).any { i ->
+            val row = rows.getJSONArray(i)
+            (headerCount until row.length()).any { col -> row.optString(col, "").isNotEmpty() }
+        }
         val dates = (1 until rows.length()).map { i -> rows.getJSONArray(i).optString(0, "").ifBlank { null } }
         return SheetSnapshot(header, dates)
     }
 
     override suspend fun addColumns(headers: List<String>) {
         if (headers.isEmpty()) return
+        check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
         val cells = JSONArray().put(JSONArray(headers))
         val range = "'daily'!${column(headerCount + 1)}1"
         call("PUT", "$base/${encode(range)}?valueInputOption=RAW", JSONObject().put("range", range).put("majorDimension", "ROWS").put("values", cells))
