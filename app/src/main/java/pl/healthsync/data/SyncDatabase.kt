@@ -55,6 +55,20 @@ abstract class ImportDao {
     @Query("SELECT * FROM UploadQueue ORDER BY date")
     abstract suspend fun queued(): List<UploadQueue>
 
+    @Query("SELECT DISTINCT q.date FROM UploadQueue q JOIN DailyObservation o ON q.date = o.date WHERE q.dirty = 1 AND o.metricId IN (:metrics) ORDER BY q.date LIMIT :limit")
+    abstract suspend fun queuedDates(metrics: List<String>, limit: Int): List<String>
+
+    @Query("SELECT * FROM DailyObservation WHERE date = :date ORDER BY metricId")
+    abstract suspend fun observationsForDate(date: String): List<DailyObservation>
+
+    @Query("DELETE FROM UploadQueue WHERE date = :date")
+    protected abstract suspend fun deleteQueued(date: String)
+
+    @Transaction
+    open suspend fun acknowledgeIfUnchanged(date: String, snapshot: List<DailyObservation>) {
+        if (observationsForDate(date) == snapshot) deleteQueued(date)
+    }
+
     @Query("SELECT metricId, MIN(date) AS earliestDate, COUNT(*) AS dayCount FROM DailyObservation GROUP BY metricId")
     abstract suspend fun summaries(): List<ObservationSummary>
 

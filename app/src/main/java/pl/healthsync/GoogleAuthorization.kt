@@ -19,15 +19,21 @@ import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import pl.healthsync.data.SyncDatabase
+import pl.healthsync.data.SheetGatewayHttp
+import pl.healthsync.data.RoomPendingQueue
+import pl.healthsync.domain.SheetSync
 import pl.healthsync.data.SheetHttpError
 import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SheetState
 import pl.healthsync.data.SheetsCreator
 
 private const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+private val syncLock = Mutex()
 
 @Composable
-fun GoogleAuthorization(activity: Activity) {
+fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
     var status by remember { mutableStateOf("Nie sprawdzono. Wymaga konfiguracji Google Cloud.") }
     var busy by remember { mutableStateOf(false) }
     var action by rememberSaveable { mutableStateOf("check") }
@@ -38,6 +44,34 @@ fun GoogleAuthorization(activity: Activity) {
 
     fun authorized(token: String?) {
         if (token.isNullOrBlank()) { busy = false; status = "Nie otrzymano tokenu."; return }
+        if (action == "sync") {
+            val sheetId = sheet?.id
+            if (sheetId == null) { busy = false; status = "Nie wybrano arkusza."; return }
+            if (selected.isEmpty()) { busy = false; status = "Wybierz przynajmniej jedną statystykę."; return }
+            val selectedSnapshot = selected.toSet()
+            scope.launch {
+                try {
+                    val database = SyncDatabase.get(activity.applicationContext)
+                    val sync = SheetSync(SheetGatewayHttp(sheetId, token), RoomPendingQueue(database.importDao(), selectedSnapshot), syncLock)
+                    var total = 0
+                    var rounds = 0
+                    do {
+                        val count = sync.uploadBatch()
+                        total += count
+                        rounds++
+                        if (count == 0) break
+                        status = "Wysłano porcje obejmujące $total dni…"
+                    } while (rounds < 10)
+                    status = if (rounds >= 10) "Wysłano porcje obejmujące $total dni. Uruchom ponownie, aby kontynuować kolejkę." else "Synchronizacja zakończona. Przetworzono $total dni."
+                } catch (e: CancellationException) { throw e }
+                catch (e: SheetHttpError) {
+                    status = if (e.code == 401 || e.code == 403) "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto." else "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
+                } catch (_: Exception) {
+                    status = "Synchronizacja zatrzymana. Sprawdź sieć i unikalność dat w arkuszu; kolejka została zachowana."
+                } finally { busy = false }
+            }
+            return
+        }
         if (action != "create") { busy = false; status = "Zgoda przyznana. Test nie tworzy arkusza."; return }
         scope.launch {
             var marked = false
@@ -94,7 +128,7 @@ fun GoogleAuthorization(activity: Activity) {
 
     Column {
         Text("Google Sheets", style = MaterialTheme.typography.titleLarge)
-        Text("Aplikacja prosi o dostęp do plików, z którymi pracuje. Utworzenie arkusza nie wysyła jeszcze danych zdrowotnych.")
+        Text("Utworzenie arkusza dodaje nagłówki. Wysłanie danych zapisuje wybrane statystyki w Twoim arkuszu.")
         OutlinedButton(enabled = !busy, onClick = { authorize("check") }) { Text("Sprawdź zgodę Google") }
         when (val state: SheetState? = sheet) {
             null -> Text("Sprawdzanie ustawień arkusza…")
@@ -102,6 +136,7 @@ fun GoogleAuthorization(activity: Activity) {
                 state.id != null && state.url != null -> {
                     Text("Arkusz: Health Connect – Daily Sync")
                     OutlinedButton(onClick = { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(state.url))) }) { Text("Otwórz arkusz") }
+                    Button(enabled = !busy && selected.isNotEmpty(), onClick = { authorize("sync") }) { Text("Wyślij zapisane dane") }
                 }
                 state.creationPending -> Text("Poprzednia próba mogła utworzyć arkusz. Sprawdź Dysk Google — kolejna próba jest wstrzymana, aby uniknąć duplikatu.")
                 else -> Button(enabled = !busy, onClick = { authorize("create") }) { Text("Utwórz arkusz") }

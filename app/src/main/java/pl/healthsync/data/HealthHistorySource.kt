@@ -76,9 +76,16 @@ private fun aggregateFor(id: String): AggregateMetric<*> = when (id) {
     "total_calories" -> TotalCaloriesBurnedRecord.ENERGY_TOTAL
     "active_calories" -> ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL
     "distance" -> DistanceRecord.DISTANCE_TOTAL
+    "floors" -> FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL
+    "elevation" -> ElevationGainedRecord.ELEVATION_GAINED_TOTAL
+    "exercise_duration" -> ExerciseSessionRecord.EXERCISE_DURATION_TOTAL
     "heart_rate_avg" -> HeartRateRecord.BPM_AVG
+    "heart_rate_min" -> HeartRateRecord.BPM_MIN
+    "heart_rate_max" -> HeartRateRecord.BPM_MAX
     "resting_heart_rate" -> RestingHeartRateRecord.BPM_AVG
     "weight_avg" -> WeightRecord.WEIGHT_AVG
+    "height_avg" -> HeightRecord.HEIGHT_AVG
+    "hydration" -> HydrationRecord.VOLUME_TOTAL
     else -> error("Nieobsługiwana metryka")
 }
 
@@ -87,8 +94,15 @@ private fun numberFor(id: String, result: AggregationResult): Double? = when (id
     "total_calories" -> result[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
     "active_calories" -> result[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
     "distance" -> result[DistanceRecord.DISTANCE_TOTAL]?.inKilometers
+    "floors" -> result[FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL]
+    "elevation" -> result[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters
+    "exercise_duration" -> result[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL]?.toMillis()?.div(3_600_000.0)
     "heart_rate_avg" -> result[HeartRateRecord.BPM_AVG]?.toDouble()
+    "heart_rate_min" -> result[HeartRateRecord.BPM_MIN]?.toDouble()
+    "heart_rate_max" -> result[HeartRateRecord.BPM_MAX]?.toDouble()
     "resting_heart_rate" -> result[RestingHeartRateRecord.BPM_AVG]?.toDouble()
     "weight_avg" -> result[WeightRecord.WEIGHT_AVG]?.inKilograms
+    "height_avg" -> result[HeightRecord.HEIGHT_AVG]?.inMeters
+    "hydration" -> result[HydrationRecord.VOLUME_TOTAL]?.inLiters
     else -> null
 }

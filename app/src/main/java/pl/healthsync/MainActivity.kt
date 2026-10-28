@@ -1,5 +1,6 @@
 package pl.healthsync
 
+import android.app.DatePickerDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -31,6 +33,8 @@ import pl.healthsync.domain.HistoryImport
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.time.temporal.ChronoUnit
 
 private val stepsPermission = HealthPermission.getReadPermission(StepsRecord::class)
@@ -50,7 +54,7 @@ class MainActivity : ComponentActivity() {
         var result by remember { mutableStateOf("Naciśnij „Sprawdź”, aby odczytać status i dostępność danych.") }
         var preview by remember { mutableStateOf("") }
         var reading by remember { mutableStateOf(false) }
-        var historyStart by remember { mutableStateOf("2000-01-01") }
+        var historyStart by rememberSaveable { mutableStateOf("2000-01-01") }
         var historyStatus by remember { mutableStateOf("Import działa na pierwszym planie; zapisane miesiące można wznowić.") }
         var historyJob by remember { mutableStateOf<Job?>(null) }
         val importer = remember(client) { client?.let { HistoryImport(HealthHistorySource(it), RoomHistoryStore(SyncDatabase.get(applicationContext).importDao())) } }
@@ -73,7 +77,7 @@ class MainActivity : ComponentActivity() {
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Health Connect — diagnostyka", style = MaterialTheme.typography.headlineSmall)
-            Text("Wersja rozwojowa: wybór metryk i diagnostyka. Synchronizacja z arkuszem nie jest jeszcze dostępna.")
+            Text("Wersja rozwojowa: wybór metryk, lokalny import i ręczne wysyłanie do arkusza.")
             Text(when (status) {
                 HealthConnectClient.SDK_AVAILABLE -> "Health Connect: dostępny"
                 HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "Health Connect: wymaga instalacji lub aktualizacji"
@@ -117,8 +121,19 @@ class MainActivity : ComponentActivity() {
                 }, enabled = !reading && selected.isNotEmpty()) { Text(if (reading) "Odczyt..." else "Podgląd ostatnich 7 dni") }
                 if (preview.isNotEmpty()) Text(preview)
                 Text("Import historii", style = MaterialTheme.typography.titleLarge)
-                Text("Początek importu to najwcześniejsza data, którą ma przeszukać aplikacja. Import w tym etapie wymaga otwartej aplikacji i nie wysyła danych do arkusza.")
-                OutlinedTextField(value = historyStart, onValueChange = { historyStart = it }, label = { Text("Data od (RRRR-MM-DD)") }, singleLine = true, enabled = historyJob == null)
+                Text("Import rozpoczyna się od wybranej daty. Wysłanie do arkusza obejmuje również starsze dane, które już są w kolejce. Import wymaga otwartej aplikacji.")
+                val chosenDate = LocalDate.parse(historyStart)
+                val displayedDate = chosenDate.format(DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.forLanguageTag("pl-PL")))
+                OutlinedButton(onClick = {
+                    val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+                    val dialog = DatePickerDialog(this@MainActivity, { _, year, month, day ->
+                        historyStart = LocalDate.of(year, month + 1, day).toString()
+                    }, chosenDate.year, chosenDate.monthValue - 1, chosenDate.dayOfMonth)
+                    val deviceZone = ZoneId.systemDefault()
+                    dialog.datePicker.minDate = LocalDate.of(1900, 1, 1).atStartOfDay(deviceZone).toInstant().toEpochMilli()
+                    dialog.datePicker.maxDate = today.atStartOfDay(deviceZone).toInstant().toEpochMilli()
+                    dialog.show()
+                }, enabled = historyJob == null) { Text("Data od: $displayedDate — wybierz") }
                 fun startImport(refresh: Boolean) {
                     val start = try { LocalDate.parse(historyStart) } catch (_: Exception) { historyStatus = "Wpisz poprawną datę w formacie RRRR-MM-DD."; return }
                     val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
@@ -143,7 +158,7 @@ class MainActivity : ComponentActivity() {
                                 val summary = summaries[metric.id]
                                 if (summary == null) "${metric.label}: brak zapisanych dni" else "${metric.label}: ${summary.dayCount} dni, najstarszy ${summary.earliestDate}"
                             }
-                            historyStatus = "Import zakończony lokalnie. Wysyłka do arkusza jeszcze nie działa. Podsumowanie obejmuje wszystkie wcześniej zapisane dane:\n$counts"
+                            historyStatus = "Import zakończony lokalnie. Aby wysłać dane, użyj przycisku w sekcji Google Sheets. Podsumowanie obejmuje wszystkie wcześniej zapisane dane:\n$counts"
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             historyStatus = "Import przerwany. Zapisane porcje można wznowić."
                             throw e
@@ -158,7 +173,7 @@ class MainActivity : ComponentActivity() {
                 }
                 OutlinedButton(onClick = { startImport(true) }, enabled = historyJob == null) { Text("Importuj ponownie") }
                 Text(historyStatus)
-                GoogleAuthorization(this@MainActivity)
+                GoogleAuthorization(this@MainActivity, selected)
                 Text("Diagnostyka", style = MaterialTheme.typography.titleLarge)
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY)) { Text("Zezwól na starszą historię") }
                 Button(onClick = { launcher.launch(setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)) }, enabled = available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND)) { Text("Zezwól na odczyt w tle") }
@@ -193,6 +208,6 @@ private suspend fun diagnose(client: HealthConnectClient): String = try {
 class PrivacyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { Text("Wersja rozwojowa zapisuje wybór metryk na urządzeniu. Po przyznaniu zgody może wyświetlić dane Health Connect i zapisać lokalnie dzienne wartości podczas importu. Nie wysyła jeszcze danych; synchronizacja z arkuszem jest w przygotowaniu.", modifier = Modifier.padding(24.dp)) } }
+        setContent { MaterialTheme { Text("Aplikacja zapisuje wybór metryk i dzienne wartości na urządzeniu po przyznaniu zgód Health Connect. Po wybraniu wysyłki zapisuje wybrane wartości w Twoim arkuszu Google Sheets, korzystając z udzielonej zgody. Dane nie są przekazywane innym serwerom aplikacji.", modifier = Modifier.padding(24.dp)) } }
     }
 }

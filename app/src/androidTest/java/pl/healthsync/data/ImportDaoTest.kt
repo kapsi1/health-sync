@@ -57,4 +57,18 @@ class ImportDaoTest {
         assertTrue(dao.observations("steps").isEmpty())
         assertTrue(dao.queued().isEmpty())
     }
+
+    @Test fun modifiedDataRemainsInQueueAfterEarlierSnapshotWasUploaded() = runTest {
+        dao.commitChunk(checkpoint, listOf(row))
+        val queue = RoomPendingQueue(dao, setOf("steps"))
+        val original = queue.snapshot(10)
+        assertEquals(0.0, original.rows.single().cells.getValue("steps"), 0.0)
+        dao.commitChunk(checkpoint, listOf(row.copy(value = 15.0, observedAtUtc = "2026-11-01T00:00:01Z")))
+        queue.acknowledge(original)
+        assertEquals(1, dao.queued().size)
+        val current = queue.snapshot(10)
+        assertEquals(15.0, current.rows.single().cells.getValue("steps"), 0.0)
+        queue.acknowledge(current)
+        assertTrue(dao.queued().isEmpty())
+    }
 }
