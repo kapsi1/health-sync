@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         var result by remember { mutableStateOf("Naciśnij „Sprawdź”, aby odczytać status i dostępność danych.") }
         var preview by remember { mutableStateOf("") }
         var reading by remember { mutableStateOf(false) }
-        var historyStart by rememberSaveable { mutableStateOf("2000-01-01") }
+        var historyStart by rememberSaveable { mutableStateOf(LocalDate.now(ZoneId.of("Europe/Warsaw")).toString()) }
         var historyStatus by remember { mutableStateOf("Import działa na pierwszym planie; zapisane miesiące można wznowić.") }
         var historyJob by remember { mutableStateOf<Job?>(null) }
         val importer = remember(client) { client?.let { HistoryImport(HealthHistorySource(it), RoomHistoryStore(SyncDatabase.get(applicationContext).importDao())) } }

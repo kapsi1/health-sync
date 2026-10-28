@@ -11,6 +11,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Dao
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import java.time.LocalDate
 
 @Entity(primaryKeys = ["date", "metricId"])
@@ -89,14 +91,25 @@ abstract class ImportDao {
     }
 }
 
-@Database(entities = [DailyObservation::class, ImportCheckpoint::class, UploadQueue::class], version = 1, exportSchema = false)
+@Database(entities = [DailyObservation::class, ImportCheckpoint::class, UploadQueue::class], version = 3, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun importDao(): ImportDao
 
     companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `HeartSample` (`recordId` TEXT NOT NULL, `timeUtc` TEXT NOT NULL, `ordinal` INTEGER NOT NULL, `localDate` TEXT NOT NULL, `sourcePackage` TEXT NOT NULL, `bpm` INTEGER NOT NULL, `dirty` INTEGER NOT NULL, PRIMARY KEY(`recordId`, `timeUtc`, `ordinal`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `HeartChunkCheckpoint` (`rangeStart` TEXT NOT NULL, `rangeEndExclusive` TEXT NOT NULL, `finishedAtUtc` TEXT NOT NULL, PRIMARY KEY(`rangeStart`, `rangeEndExclusive`))")
+            }
+        }
+        // Keep legacy tables intact so upgrading never deletes existing measurements.
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) = Unit
+        }
         @Volatile private var instance: SyncDatabase? = null
         fun get(context: Context): SyncDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, SyncDatabase::class.java, "health-sync.db")
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
         }
     }

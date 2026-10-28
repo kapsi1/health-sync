@@ -24,9 +24,9 @@ Zaimplementuj **działającą aplikację**, nie jedynie makiety ani pseudokod. R
 8. Brak duplikatów, utraty danych przy przerwanym imporcie oraz niejawnego zamieniania braku danych na zero.
 9. Możliwość zainstalowania własnego debug/release APK bez publikowania w Google Play.
 
-**Rozgraniczenie pojęć:** „cała historia” oznacza pełny okres danych **rzeczywiście dostępnych przez Health Connect** dla danej kategorii i przyznanych uprawnień. Nie oznacza całej historii przechowywanej wyłącznie w chmurze Fitbit/Google Health. „Wszystkie statystyki” w MVP oznaczają wszystkie pozycje katalogu MVP; w dalszym etapie katalog należy rozszerzyć. Eksport **surowych pomiarów** (np. każdy odczyt tętna) to odrębna funkcja, zaplanowana po MVP.
+**Rozgraniczenie pojęć:** „cała historia” oznacza pełny okres danych **rzeczywiście dostępnych przez Health Connect** dla danej kategorii i przyznanych uprawnień. Nie oznacza całej historii przechowywanej wyłącznie w chmurze Fitbit/Google Health. „Wszystkie statystyki” w MVP oznaczają wszystkie pozycje katalogu MVP; w dalszym etapie katalog należy rozszerzyć.
 
-**Rozszerzenie zakresu — decyzja użytkownika:** docelowo synchronizuj wszystkie dostępne na urządzeniu i dla aplikacji typy danych Health Connect, na które użytkownik wyrazi zgodę, a nie jedynie katalog MVP. W `daily` umieszczaj sensowne agregaty dzienne; szczegółowe rekordy, serie pomiarów oraz dane złożone umieszczaj w osobnych zakładkach o jawnej strukturze, zachowując identyfikatory i pochodzenie. Katalog, dostępność poszczególnych typów i wymagane uprawnienia określ na podstawie wersji SDK i funkcji urządzenia; funkcje i typy niedostępne mają czytelny status. Dokumentacja medyczna i inne typy wymagające osobnych API lub dodatkowych zgód wymagają osobnej weryfikacji — nie oznaczaj ich jako obsługiwanych przed rzeczywistym wdrożeniem. Odczyt jest stronicowany, a eksport wznawialny i idempotentny; przy ograniczeniach arkusza pokaż ograniczenie i umożliwiaj bezpieczne wznowienie. Zmiana ta rozszerza P2 i P3 do wymagań docelowych bez zastępowania potrzebnej najpierw synchronizacji MVP.
+**Zakres docelowy — decyzja użytkownika:** synchronizuj dostępne typy danych Health Connect, dla których można ustalić użyteczną statystykę dzienną i uzyskano zgodę. W `daily` zapisuj agregaty dzienne; nie planuj eksportu pojedynczych pomiarów ani oddzielnych zakładek ze szczegółowymi seriami. Typy bez sensownej statystyki dziennej pozostają nieobsługiwane. Dostępność typów i wymagane uprawnienia określ na podstawie wersji SDK i urządzenia. Import i synchronizacja mają być wznawialne i idempotentne.
 
 ## 2. Najważniejsze ograniczenia zewnętrznych API
 
@@ -205,14 +205,7 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 - Pozostałe typy HC, m.in. HR min/max, HRV, tlen, oddechy, fazy snu, liczba/piętra, ćwiczenia i czas ćwiczeń, masa/tłuszcz, nawodnienie, żywienie, VO2max, ciśnienie i inne **dopiero po opracowaniu semantyki i pozwoleniach**.
 - Dynamiczne grupowanie kategorii i wyszukiwanie, podgląd „ostatni pomiar”, odróżnienie dostępności typu od obecności danych, jednostki i strategie `sum/avg/min/max/latest/count`.
 - Zapobieganie dublowaniu źródeł; opcjonalny wybór źródła (Google Health vs inne aplikacje), z opisem wpływu na agregację i priorytety HC.
-- Obsługa atrybutów złożonych i rekordów, których nie da się sensownie przedstawić w jednej liczbie dziennej, przez osobne zakładki/formaty.
-
-### P3. Pełny eksport surowych rekordów
-
-- Osobny przycisk **„Eksportuj wszystkie dostępne rekordy”** z wyborem kategorii, okresu i lokalizacji (CSV/JSON/ZIP na telefonie; opcjonalnie Google Drive).
-- Paginowany streaming `readRecords`, metadane źródła i znaczniki czasu, stabilne ID do deduplikacji, checkpointy, poprawna obsługa serii (np. wiele pomiarów tętna na minutę).
-- Oddzielny format/zakładki od `daily` i jawne ostrzeżenie o rozmiarze oraz wrażliwości danych.
-- Import Google Takeout jako oddzielna ścieżka jest wymagany w M7; nie przypisuj jego danych możliwościom Health Connect.
+- Dodawaj wyłącznie statystyki o ustalonej, sensownej semantyce dziennej.
 
 ### P4. Dashboard i analiza
 
@@ -249,7 +242,7 @@ date,steps,total_kcal,active_kcal,distance_km,heart_rate_avg_bpm,resting_hr_bpm,
 3. `docs/architecture.md`, `docs/metric-registry.md`, `docs/feasibility.md`, `docs/test-results.md`.
 4. Testy automatyczne (repozytoria fake, agregacje, migracje metryk, idempotencja upsert, worker) oraz checklist testu na urządzeniu.
 5. Działający instalowalny APK wygenerowany na końcu, jeśli build environment to umożliwia; w przeciwnym razie jasny opis blokera wraz z logami builda i instrukcją lokalnego zbudowania.
-6. Lista funkcji dostarczonych, pozostałych problemów oraz propozycja realizacji etapów P1–P5.
+6. Lista funkcji dostarczonych, pozostałych problemów oraz propozycja realizacji etapów P1, P2, P4 i P5.
 
 ## 11. Źródła i dokumentacja do sprawdzenia przed implementacją
 
