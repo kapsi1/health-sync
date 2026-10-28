@@ -10,6 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.Color
 import pl.healthsync.data.SheetSettings
 import androidx.compose.ui.unit.dp
@@ -142,17 +146,18 @@ class MainActivity : ComponentActivity() {
                 val labelStyle = MaterialTheme.typography.labelSmall
                 val availableWidth = with(LocalDensity.current) { (maxWidth / 4 - 16.dp).roundToPx() }
                 val syncLabel = if (measurer.measure("Synchronizuj", style = labelStyle).size.width <= availableWidth) "Synchronizuj" else "Sync"
-                NavigationBar {
+                NavigationBar(modifier = Modifier.selectableGroup()) {
                     listOf(syncLabel, "Dane", "Arkusz", "Dziennik").forEachIndexed { index, label ->
-                        NavigationBarItem(selected = tab == index, onClick = { tab = index },
-                            icon = {
-                                when (index) {
-                                    0 -> Icon(painterResource(R.drawable.nav_sync), contentDescription = null, modifier = Modifier.size(24.dp))
-                                    2 -> Icon(painterResource(R.drawable.nav_sheet), contentDescription = null, modifier = Modifier.size(24.dp))
-                                    else -> Text(if (index == 1) "☷" else "≡", style = MaterialTheme.typography.titleMedium)
-                                }
-                            },
-                            label = { Text(label, style = labelStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }, alwaysShowLabel = true)
+                        Box(
+                            modifier = Modifier.weight(1f).height(56.dp)
+                                .background(if (tab == index) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, shape = MaterialTheme.shapes.small)
+                                .selectable(selected = tab == index, role = Role.Tab, onClick = { tab = index }),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                                color = if (tab == index) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = labelStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
@@ -342,7 +347,7 @@ class MainActivity : ComponentActivity() {
                         val lastAuto = runs.filter { it.kind == "Automatyczna" && it.complete && it.events.isNotEmpty() }
                             .maxByOrNull { it.events.last().at }
                         val lastTime = lastAuto?.events?.lastOrNull()?.at?.let { runCatching { Instant.parse(it) }.getOrNull() }
-                        val label = if (lastAuto?.error == true) "Ostatnia próba" else "Ostatnia synchronizacja"
+                        val label = if (lastAuto?.error == true) "Ostatnia próba" else "Ostatnia"
                         Text(if (lastTime == null) "Brak zapisanej automatycznej synchronizacji" else "$label: ${relativeTime(lastTime, clockNow)}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
