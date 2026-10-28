@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.graphics.Color
 import pl.healthsync.data.SheetSettings
@@ -97,6 +98,10 @@ class MainActivity : ComponentActivity() {
         var manualRunId by remember { mutableStateOf<String?>(null) }
         var syncRequest by remember { mutableIntStateOf(0) }
         var googleBusy by remember { mutableStateOf(false) }
+        var syncBusy by remember { mutableStateOf(false) }
+        val importDao = remember { SyncDatabase.get(applicationContext).importDao() }
+        val pendingImport by importDao.observeManualSession().collectAsState(initial = null)
+        val canResume = pendingImport?.let { it.start == historyStart && it.metricIds.split(",").toSet() == selected } == true
         val sheetSettings = remember { SheetSettings(applicationContext) }
         val currentSheet by sheetSettings.state.collectAsState(initial = null)
         var pendingPermission by remember { mutableStateOf("") }
@@ -119,6 +124,19 @@ class MainActivity : ComponentActivity() {
             result = "Zgody zaktualizowane. Naciśnij „Sprawdź”."
         }
         Scaffold(bottomBar = {
+            Column {
+            if (tab != 0 && (historyJob != null || syncBusy)) {
+                Surface(modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Wróć do synchronizacji" }.clickable { tab = 0 }, color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (historyJob != null) {
+                            LinearProgressIndicator(progress = { if (progressTotal > 0) progressDone.toFloat() / progressTotal else 0f }, modifier = Modifier.weight(1f))
+                            Text("$progressDone/$progressTotal", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
             BoxWithConstraints {
                 val measurer = rememberTextMeasurer()
                 val labelStyle = MaterialTheme.typography.labelSmall
@@ -127,10 +145,17 @@ class MainActivity : ComponentActivity() {
                 NavigationBar {
                     listOf(syncLabel, "Dane", "Arkusz", "Dziennik").forEachIndexed { index, label ->
                         NavigationBarItem(selected = tab == index, onClick = { tab = index },
-                            icon = { Text(listOf("↻", "☷", "▤", "≡")[index], style = MaterialTheme.typography.titleMedium) },
+                            icon = {
+                                when (index) {
+                                    0 -> Icon(painterResource(R.drawable.nav_sync), contentDescription = null, modifier = Modifier.size(24.dp))
+                                    2 -> Icon(painterResource(R.drawable.nav_sheet), contentDescription = null, modifier = Modifier.size(24.dp))
+                                    else -> Text(if (index == 1) "☷" else "≡", style = MaterialTheme.typography.titleMedium)
+                                }
+                            },
                             label = { Text(label, style = labelStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }, alwaysShowLabel = true)
                     }
                 }
+            }
             }
         }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -276,7 +301,10 @@ class MainActivity : ComponentActivity() {
                         else historyStatus = "Nie przyznano zgody na odczyt w tle. Synchronizacja automatyczna nie została włączona."
                     }
                 }
-                Button(onClick = { beginManual() }, enabled = historyJob == null && !googleBusy, modifier = Modifier.fillMaxWidth()) { Text(if (historyJob == null && !googleBusy) "Importuj i synchronizuj" else "Synchronizowanie…") }
+                if (pendingImport != null && historyJob == null && !syncBusy) {
+                    Text(if (canResume) "Poprzedni import został przerwany. Możesz go wznowić." else "Istnieje przerwany import z inną datą lub wyborem danych. Rozpoczęcie nowego importu zastąpi możliwość jego wznowienia; zapisane dane pozostaną.", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(onClick = { beginManual() }, enabled = historyJob == null && !googleBusy, modifier = Modifier.fillMaxWidth()) { Text(if (historyJob != null || googleBusy) "Synchronizowanie…" else if (canResume) "Wznów import i synchronizuj" else "Importuj i synchronizuj") }
                 if (historyJob != null) {
                     Text("Nie wychodź z aplikacji", style = MaterialTheme.typography.bodySmall)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -319,7 +347,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 }
-                GoogleAuthorization(this@MainActivity, selected, tab == 2, syncRequest, manualRunId, historyJob != null, { if (syncRequest > 0) historyStatus = if (isGoogleError(it)) it else "" }, { googleBusy = it })
+                GoogleAuthorization(this@MainActivity, selected, tab == 2, syncRequest, manualRunId, historyJob != null, { if (syncRequest > 0) historyStatus = if (isGoogleError(it)) it else "" }, { googleBusy = it }, { syncBusy = it })
                 if (tab == 3) {
                     var errorsOnly by rememberSaveable { mutableStateOf(false) }
                     val clipboard = LocalClipboardManager.current
@@ -339,6 +367,13 @@ class MainActivity : ComponentActivity() {
                                 if (!expanded) run.events.lastOrNull()?.let { Text("${formatJournalTime(it.at)} · ${it.message}", style = MaterialTheme.typography.bodySmall) }
                                 if (expanded) {
                                     run.events.forEach { event -> Text("${formatJournalTime(event.at)} — ${event.message}", style = MaterialTheme.typography.bodySmall) }
+                                    if (run.error) {
+                                        when (recoveryDestination(run.events.lastOrNull()?.message.orEmpty())) {
+                                            RecoveryDestination.SHEET -> TextButton(onClick = { tab = 2 }) { Text("Sprawdź arkusz i dostęp Google") }
+                                            RecoveryDestination.DATA -> TextButton(onClick = { tab = 1 }) { Text("Sprawdź wybór danych i zgody") }
+                                            RecoveryDestination.SYNC -> TextButton(onClick = { tab = 0 }) { Text("Przejdź do synchronizacji") }
+                                        }
+                                    }
                                     OutlinedButton(onClick = { clipboard.setText(AnnotatedString(run.events.joinToString("\n") { "${formatJournalTime(it.at)} — ${it.message}" })) }) { Text("Kopiuj szczegóły") }
                                 }
                             }

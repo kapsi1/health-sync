@@ -26,8 +26,8 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [x] Data początkowa z natywnym wybieraczem, zapamiętywanie daty, wspólny przycisk importu i wysyłki, pasek rzeczywistego postępu porcji, przerwanie importu.
 - [x] Kontekstowa prośba o starszą historię i odczyt w tle; konfiguracja automatycznej synchronizacji i czas ostatniego uruchomienia.
 - [x] Dziennik ręczny i automatyczny, grupowanie etapów i ponowień, filtr błędów oraz kopiowanie nowych szczegółów bez wartości pomiarów lub tokenów; poprzednia historia zachowana.
-- [~] Pełna diagnostyka: komunikaty i kody istnieją, ale działania naprawcze w dzienniku oraz liczby osobno dodanych i zmienionych wierszy nie są kompletne.
-- [ ] Widok postępu działającej synchronizacji dostępny we wszystkich zakładkach; czytelne wznowienie po restarcie.
+- [~] Dziennik wskazuje odpowiednią zakładkę przy typowych błędach i zachowuje kody HTTP. Szczegółowe działania naprawcze i liczby osobno dodanych i zmienionych wierszy nie są kompletne.
+- [~] Pasek postępu jest dostępny we wszystkich zakładkach; przerwany import jest oznaczony i można go wznowić. Wymaga ręcznej weryfikacji nowego interfejsu na urządzeniu.
 
 ### Health Connect i import
 
@@ -35,7 +35,7 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [x] Starsza historia zależy od dostępności funkcji i zgody Health Connect. Data początku jest wybierana ręcznie; brak osobnego trybu „cała dostępna historia”.
 - [x] Dodanie metryki uruchamia uzupełnianie wybranego wcześniej zakresu, a odznaczenie nie usuwa wartości.
 - [x] Import jest dzielony na porcje i ma trwałą sesję wznowienia; rozpoczęcie pełnego przeliczenia i unieważnienie punktów kontrolnych są atomowe. Po przerwaniu wznawia porcja po porcji, a po ukończeniu kolejne uruchomienie ponownie odczytuje wybrany zakres. Automatyczne testy obejmują przerwanie, następny dzień i migrację bazy.
-- [~] Ręcznie sprawdzić przerwanie i wznowienie importu na rzeczywistych danych telefonu, także po ponownym uruchomieniu aplikacji.
+- [~] Użytkownik potwierdził wznowienie importu na rzeczywistych danych; ponowne uruchomienie aplikacji przed wznowieniem pozostaje do sprawdzenia.
 - [~] Lista zmian Health Connect wykrywa nowe i zmienione rekordy wagi i tłuszczu, także sprzed ostatnich 3 dni. Wygaśnięcie tokenu uruchamia porcjowe odtwarzanie dotychczas importowanego zakresu. Przypadki na prawdziwych danych wymagają dalszego testu.
 - [ ] Bezpieczne przetwarzanie usunięć i zmian daty pomiaru: minimalne mapowanie ID na dzień, potwierdzony ponowny odczyt i dopiero wtedy ewentualne wyczyszczenie odpowiedniej komórki; brak zgody lub błąd nigdy nie oznacza usunięcia.
 - [~] Wsparcie większej liczby typów danych wyłącznie po ustaleniu sensownej dziennej statystyki, jednostek, uprawnień i sposobu unikania duplikacji źródeł.

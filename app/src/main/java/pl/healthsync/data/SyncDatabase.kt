@@ -14,6 +14,7 @@ import androidx.room.Dao
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import java.time.LocalDate
+import kotlinx.coroutines.flow.Flow
 
 @Entity(primaryKeys = ["date", "metricId"])
 data class DailyObservation(val date: String, val metricId: String, val value: Double, val unit: String, val observedAtUtc: String)
@@ -59,6 +60,9 @@ abstract class ImportDao {
 
     @Query("SELECT * FROM ManualImportSession WHERE id = 1")
     abstract suspend fun manualSession(): ManualImportSession?
+
+    @Query("SELECT * FROM ManualImportSession WHERE id = 1")
+    abstract fun observeManualSession(): Flow<ManualImportSession?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     protected abstract suspend fun saveManualSession(session: ManualImportSession)

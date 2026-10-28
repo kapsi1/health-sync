@@ -48,7 +48,7 @@ internal val syncLock = Mutex()
 internal val sheetOperationLock = Mutex()
 
 @Composable
-fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Boolean, syncRequest: Int, manualRunId: String?, importBusy: Boolean, onStatus: (String) -> Unit, onBusy: (Boolean) -> Unit) {
+fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Boolean, syncRequest: Int, manualRunId: String?, importBusy: Boolean, onStatus: (String) -> Unit, onBusy: (Boolean) -> Unit, onSyncBusy: (Boolean) -> Unit) {
     var status by remember { mutableStateOf("Nie sprawdzono. Wymaga konfiguracji Google Cloud.") }
     var busy by remember { mutableStateOf(false) }
     var action by rememberSaveable { mutableStateOf("check") }
@@ -136,12 +136,12 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Bool
                     }
                 } catch (e: CancellationException) { failure = "Synchronizacja została przerwana. Kolejka jest zachowana."; throw e }
                 catch (e: SheetHttpError) {
-                    failure = "Błąd Google Sheets (HTTP ${e.code}). Kolejka jest zachowana."
                     status = when (e.code) {
                         401, 403 -> "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto."
                         404 -> "Arkusz lub zakładka daily są niedostępne (HTTP 404). Sprawdź dostęp albo wybierz inny arkusz. Kolejka jest zachowana."
                         else -> "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
                     }
+                    failure = status
                 } catch (e: IllegalStateException) {
                     failure = "Nie ukończono synchronizacji. Sprawdź wybór danych i zgody."
                     status = "Nie ukończono synchronizacji: ${e.message ?: "sprawdź dostęp do danych"}. Zapisane dane zostały zachowane."
@@ -217,7 +217,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Bool
 
     LaunchedEffect(syncRequest) { if (syncRequest > 0 && !busy) authorize("sync") }
     LaunchedEffect(status) { onStatus(status) }
-    LaunchedEffect(busy) { onBusy(busy) }
+    LaunchedEffect(busy) { onBusy(busy); onSyncBusy(busy && action == "sync") }
 
     if (visible && showSwitchChoice) AlertDialog(
         onDismissRequest = { showSwitchChoice = false },
