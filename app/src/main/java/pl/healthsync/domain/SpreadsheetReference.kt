@@ -11,3 +11,9 @@ fun spreadsheetId(input: String): String? {
     } else text
     return id.takeIf { it.matches(Regex("[A-Za-z0-9_-]{10,}")) }
 }
+
+/** Reject empty or multiple selections; the app attaches exactly one spreadsheet. */
+fun pickedSpreadsheetId(value: String?): String? {
+    val ids = value?.split(',')?.map(String::trim) ?: return null
+    return if (ids.size == 1) spreadsheetId(ids.single()) else null
+}

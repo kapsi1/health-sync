@@ -25,6 +25,9 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
     private val spreadsheet = "https://sheets.googleapis.com/v4/spreadsheets/${encode(spreadsheetId)}"
     private val base = "$spreadsheet/values"
 
+    suspend fun spreadsheetName(): String = call("GET", "$spreadsheet?fields=${encode("properties.title")}")
+        .getJSONObject("properties").getString("title")
+
     suspend fun reconcileColumns(known: Set<String>, selected: Set<String>) {
         val snapshot = snapshot()
         planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())

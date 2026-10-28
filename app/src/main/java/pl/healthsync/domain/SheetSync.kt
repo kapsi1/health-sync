@@ -8,6 +8,12 @@ data class SheetSnapshot(val headers: List<String>, val dateCells: List<String?>
 data class PendingSheetDay(val date: LocalDate, val cells: Map<String, Double>, val revision: String)
 data class PendingBatch(val rows: List<PendingSheetDay>)
 
+/** Counts successful row writes; an existing row can be written even when its values are unchanged. */
+data class SheetBatchResult(val added: Int, val existing: Int) {
+    val processed: Int get() = added + existing
+    operator fun plus(other: SheetBatchResult) = SheetBatchResult(added + other.added, existing + other.existing)
+}
+
 interface SheetGateway {
     suspend fun snapshot(): SheetSnapshot
     suspend fun addColumns(headers: List<String>)
@@ -23,10 +29,10 @@ interface PendingQueue {
 
 /** A single instance is shared by manual and background synchronizers. */
 class SheetSync(private val gateway: SheetGateway, private val queue: PendingQueue, private val lock: Mutex = Mutex()) {
-    suspend fun uploadBatch(limit: Int = 100): Int = lock.withLock {
+    suspend fun uploadBatch(limit: Int = 100): SheetBatchResult = lock.withLock {
         require(limit in 1..500)
         val batch = queue.snapshot(limit)
-        if (batch.rows.isEmpty()) return@withLock 0
+        if (batch.rows.isEmpty()) return@withLock SheetBatchResult(0, 0)
         val snapshot = gateway.snapshot()
         val rows = batch.rows.map { SheetRow(it.date, it.cells) }
         val columns = rows.flatMap { it.cells.keys }.toSet()
@@ -35,6 +41,6 @@ class SheetSync(private val gateway: SheetGateway, private val queue: PendingQue
         if (plan.updates.isNotEmpty()) gateway.updateCells(plan.updates)
         if (plan.newRows.isNotEmpty()) gateway.appendRows(plan.newRows)
         queue.acknowledge(batch)
-        batch.rows.size
+        SheetBatchResult(plan.newRows.size, plan.updates.map { it.rowNumber }.distinct().size)
     }
 }

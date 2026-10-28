@@ -34,6 +34,7 @@ import pl.healthsync.data.SelectedMetricBackfill
 import pl.healthsync.data.HealthChanges
 import pl.healthsync.domain.HistoryImport
 import pl.healthsync.domain.SheetSync
+import pl.healthsync.domain.SheetBatchResult
 import java.io.IOException
 import java.time.LocalDate
 import java.time.Instant
@@ -109,13 +110,16 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             val gateway = SheetGatewayHttp(sheetId, token)
             syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), metrics.map { it.column }.toSet()) }
             val sync = SheetSync(gateway, RoomPendingQueue(db.importDao(), selected) { MetricSelection(applicationContext).selected.first() }, syncLock)
-            var total = 0
+            var total = SheetBatchResult(0, 0)
             repeat(10) {
-                val count = sync.uploadBatch()
-                total += count
-                if (count == 0) { record("Synchronizacja zakończona: przetworzono $total dni.${changesAlert?.let { " $it" } ?: ""}"); return Result.success() }
+                val result = sync.uploadBatch()
+                total += result
+                if (result.processed == 0) {
+                    record("Synchronizacja zakończona. Dodano wierszy: ${total.added}; zapisano w istniejących: ${total.existing}.${changesAlert?.let { " $it" } ?: ""}")
+                    return Result.success()
+                }
             }
-            record("Przetworzono $total dni; pozostała kolejka zostanie wysłana podczas kolejnej synchronizacji.${changesAlert?.let { " $it" } ?: ""}")
+            record("Dodano wierszy: ${total.added}; zapisano w istniejących: ${total.existing}. Dane pozostałe w kolejce zostaną wysłane przy kolejnej synchronizacji.${changesAlert?.let { " $it" } ?: ""}")
             return Result.success()
         } catch (e: CancellationException) {
             withContext(NonCancellable) { settings.log("Synchronizacja została przerwana."); journal.event(runId, "Automatyczna", "Synchronizacja została przerwana.", error = true, complete = true) }

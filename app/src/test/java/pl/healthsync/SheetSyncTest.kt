@@ -34,7 +34,7 @@ class SheetSyncTest {
         val sync = SheetSync(gateway, queue)
         try { sync.uploadBatch(); fail("expected timeout") } catch (_: IllegalStateException) { }
         assertEquals(0, queue.acknowledgments)
-        sync.uploadBatch()
+        assertEquals(SheetBatchResult(0, 1), sync.uploadBatch())
         assertEquals(1, gateway.appendCalls)
         assertEquals(1, gateway.updates)
         assertEquals(1, queue.acknowledgments)
@@ -58,5 +58,19 @@ class SheetSyncTest {
         }
         SheetSync(gateway, queue).uploadBatch()
         assertEquals(PendingBatch(listOf(second)), queue.batch)
+    }
+    @Test fun `counts added and existing rows only after acknowledged upload`() = runBlocking {
+        val existing = date
+        val added = date.plusDays(1)
+        val queue = FakeQueue(PendingBatch(listOf(
+            PendingSheetDay(existing, mapOf("steps" to 5.0, "weight" to 70.0), "one"),
+            PendingSheetDay(added, mapOf("steps" to 6.0), "two")
+        )))
+        val gateway = FakeGateway().apply { headers = listOf("date", "steps", "weight"); dates.add(existing.toString()) }
+        val sync = SheetSync(gateway, queue)
+        assertEquals(SheetBatchResult(1, 1), sync.uploadBatch())
+        assertEquals(2, gateway.updates)
+        assertEquals(1, queue.acknowledgments)
+        assertEquals(SheetBatchResult(0, 0), sync.uploadBatch())
     }
 }

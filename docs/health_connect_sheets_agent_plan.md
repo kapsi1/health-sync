@@ -26,7 +26,7 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [x] Data początkowa z natywnym wybieraczem, zapamiętywanie daty, wspólny przycisk importu i wysyłki, pasek rzeczywistego postępu porcji, przerwanie importu.
 - [x] Kontekstowa prośba o starszą historię i odczyt w tle; konfiguracja automatycznej synchronizacji i czas ostatniego uruchomienia.
 - [x] Dziennik ręczny i automatyczny, grupowanie etapów i ponowień, filtr błędów oraz kopiowanie nowych szczegółów bez wartości pomiarów lub tokenów; poprzednia historia zachowana.
-- [~] Dziennik wskazuje odpowiednią zakładkę przy typowych błędach i zachowuje kody HTTP. Szczegółowe działania naprawcze i liczby osobno dodanych i zmienionych wierszy nie są kompletne.
+- [~] Dziennik wskazuje odpowiednią zakładkę przy typowych błędach i zachowuje kody HTTP. Pokazuje osobno liczbę dodanych wierszy i zapisów do istniejących (bez twierdzenia, że wartości się zmieniły). Szczegółowe działania naprawcze pozostają do uzupełnienia; użytkownik potwierdził działanie liczników w rzeczywistym arkuszu.
 - [~] Pasek postępu jest dostępny we wszystkich zakładkach; przerwany import jest oznaczony i można go wznowić. Wymaga ręcznej weryfikacji nowego interfejsu na urządzeniu.
 
 ### Health Connect i import
@@ -47,7 +47,7 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [x] Aktualizacja po dacie i wznowienie kolejki, bez zmiany obcych zakładek i kolumn. Istnieją testy logiki ponowienia oraz timeoutu po zapisie.
 - [x] Kolumny wyłączonych metryk są ukrywane, a włączonych dodawane lub odkrywane; uzupełnianie historii potwierdzone przez użytkownika.
 - [x] Formatowanie: kcal bez części ułamkowej, dystans do 3 miejsc po przecinku, czas ćwiczeń jako czas.
-- [ ] Google Picker do wyboru istniejącego pliku i nadania mu dostępu `drive.file`, gdy samo ID lub URL nie wystarcza. Uwzględnić usunięty lub niedostępny arkusz i zachować kolejkę.
+- [~] Zaimplementowano Google Picker dla Androida do wyboru pliku i nadania dostępu `drive.file`; w projekcie Cloud trzeba włączyć Google Picker API. Użytkownik potwierdził działanie na urządzeniu; pozostaje sprawdzić anulowanie, odmowę i nieprawidłową strukturę arkusza. Kolejka zostaje zachowana przy błędach.
 - [~] Przetestować przywrócenie po wyczyszczeniu danych aplikacji z tym samym arkuszem oraz odmowę i ponowne przyznanie dostępu.
 
 ### Testy, wydanie i dokumentacja
@@ -57,7 +57,7 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [~] Zweryfikować wznowienie na rzeczywistych danych po przerwaniu i restarcie aplikacji.
 - [ ] Sprawdzić brak sieci, odwołanie zgód, retry po timeout, restart telefonu, duży zakres historii oraz skutki współbieżnych operacji na urządzeniu.
 - [ ] Zweryfikować wybrane agregaty ze źródłem Health Connect, w tym strefę czasu, zmianę czasu, sesje snu i różne źródła danych.
-- [~] README i instrukcja Google Cloud istnieją; uaktualnić opis stanu i ograniczeń oraz dostarczyć `docs/architecture.md` i `docs/test-results.md`.
+- [x] README, instrukcja Google Cloud, `docs/architecture.md` i `docs/test-results.md` opisują aktualny stan, ograniczenia i testy.
 - [ ] Przygotować powtarzalną instrukcję wydania oraz podpisany release APK, jeśli użytkownik będzie go potrzebował; nie umieszczać kluczy podpisu w repozytorium.
 
 ## Dalsze możliwości, bez zmiany obecnego zakresu
