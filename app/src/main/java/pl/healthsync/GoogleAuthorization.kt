@@ -7,6 +7,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,30 +45,46 @@ import androidx.health.connect.client.HealthConnectClient
 
 internal const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 internal val syncLock = Mutex()
+internal val sheetOperationLock = Mutex()
 
 @Composable
-fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
+fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Boolean, syncRequest: Int, manualRunId: String?, importBusy: Boolean, onStatus: (String) -> Unit, onBusy: (Boolean) -> Unit) {
     var status by remember { mutableStateOf("Nie sprawdzono. Wymaga konfiguracji Google Cloud.") }
     var busy by remember { mutableStateOf(false) }
     var action by rememberSaveable { mutableStateOf("check") }
     var sheetReference by rememberSaveable { mutableStateOf("") }
     var pendingSheetId by rememberSaveable { mutableStateOf("") }
     var showSheetCheck by rememberSaveable { mutableStateOf(false) }
+    var showSwitchChoice by rememberSaveable { mutableStateOf(false) }
+    var queueAllForSwitch by rememberSaveable { mutableStateOf(false) }
     val settings = remember { SheetSettings(activity.applicationContext) }
     val sheet by settings.state.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     val client = remember { Identity.getAuthorizationClient(activity) }
 
+    fun recordAuthorizationFailure() {
+        val runId = manualRunId
+        if (action == "sync" && runId != null) scope.launch {
+            SyncJournal(activity.applicationContext).event(runId, "Ręczna", "Autoryzacja Google nie powiodła się. Sprawdź dostęp i spróbuj ponownie.", error = true, complete = true)
+        }
+    }
+
     fun authorized(token: String?) {
-        if (token.isNullOrBlank()) { busy = false; status = "Nie otrzymano tokenu."; return }
+        if (token.isNullOrBlank()) { busy = false; status = "Nie otrzymano tokenu."; recordAuthorizationFailure(); return }
         if (action == "attach") {
             val id = pendingSheetId
             scope.launch {
                 try {
-                    syncLock.withLock {
-                        val snapshot = SheetGatewayHttp(id, token).snapshot()
-                        planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())
-                        settings.save(id, "https://docs.google.com/spreadsheets/d/$id/edit")
+                    sheetOperationLock.withLock {
+                        syncLock.withLock {
+                            val snapshot = SheetGatewayHttp(id, token).snapshot()
+                            planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())
+                            if (queueAllForSwitch && settings.state.first().id != id) {
+                                val dao = SyncDatabase.get(activity.applicationContext).importDao()
+                                MetricRegistry.all.forEach { dao.queueMetric(it.id) }
+                            }
+                            settings.save(id, "https://docs.google.com/spreadsheets/d/$id/edit")
+                        }
                     }
                     status = "Podłączono arkusz. Zaimportuj dane i uruchom synchronizację."
                 } catch (e: CancellationException) { throw e }
@@ -85,7 +107,11 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
             if (sheetId == null) { busy = false; status = "Nie wybrano arkusza."; return }
             val selectedSnapshot = selected.toSet()
             scope.launch {
+                var failure: String? = null
                 try {
+                    manualRunId?.let { SyncJournal(activity.applicationContext).event(it, "Ręczna", "Rozpoczęto wysyłanie do arkusza.") }
+                    sheetOperationLock.withLock {
+                    check(settings.state.first().id == sheetId) { "Arkusz zmienił się; uruchom synchronizację ponownie" }
                     val database = SyncDatabase.get(activity.applicationContext)
                     val gateway = SheetGatewayHttp(sheetId, token)
                     syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), MetricRegistry.all.filter { it.id in selectedSnapshot }.map { it.column }.toSet()) }
@@ -107,14 +133,26 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                     } while (rounds < 10)
                     status = if (rounds >= 10) "Wysłano porcje obejmujące $total dni. Uruchom ponownie, aby kontynuować kolejkę." else "Synchronizacja zakończona. Przetworzono $total dni."
                     if (changesAlert != null) status += " $changesAlert"
-                } catch (e: CancellationException) { throw e }
+                    }
+                } catch (e: CancellationException) { failure = "Synchronizacja została przerwana. Kolejka jest zachowana."; throw e }
                 catch (e: SheetHttpError) {
-                    status = if (e.code == 401 || e.code == 403) "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto." else "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
+                    failure = "Błąd Google Sheets (HTTP ${e.code}). Kolejka jest zachowana."
+                    status = when (e.code) {
+                        401, 403 -> "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto."
+                        404 -> "Arkusz lub zakładka daily są niedostępne (HTTP 404). Sprawdź dostęp albo wybierz inny arkusz. Kolejka jest zachowana."
+                        else -> "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
+                    }
                 } catch (e: IllegalStateException) {
+                    failure = "Nie ukończono synchronizacji. Sprawdź wybór danych i zgody."
                     status = "Nie ukończono synchronizacji: ${e.message ?: "sprawdź dostęp do danych"}. Zapisane dane zostały zachowane."
                 } catch (_: Exception) {
+                    failure = "Nie udało się wysłać danych. Sprawdź połączenie i arkusz."
                     status = "Synchronizacja zatrzymana. Sprawdź sieć i unikalność dat w arkuszu; kolejka została zachowana."
-                } finally { busy = false }
+                } finally {
+                    busy = false
+                    BackgroundSettings(activity.applicationContext).log("Synchronizacja ręczna: $status")
+                    manualRunId?.let { SyncJournal(activity.applicationContext).event(it, "Ręczna", failure ?: status, error = failure != null, complete = true) }
+                }
             }
             return
         }
@@ -126,7 +164,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                 marked = true
                 val created = SheetsCreator().create(token, selected.toSet())
                 settings.save(created.id, created.url)
-                status = "Arkusz utworzony. Synchronizacja danych jest w przygotowaniu."
+                status = "Arkusz utworzony. Możesz rozpocząć synchronizację."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SheetHttpError) {
@@ -144,20 +182,24 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
         if (result.data == null) {
             busy = false
             status = "Okno Google zamknęło się bez wyniku (kod Android: ${result.resultCode})."
+            recordAuthorizationFailure()
         } else try {
             authorized(client.getAuthorizationResultFromIntent(result.data).accessToken)
         } catch (e: ApiException) {
             busy = false
             status = "Autoryzacja nie powiodła się. Kod Google: ${e.statusCode}; wynik okna Android: ${result.resultCode}."
+            recordAuthorizationFailure()
         } catch (e: Exception) {
             busy = false
             status = "Nie uzyskano zgody (${e.javaClass.simpleName})."
+            recordAuthorizationFailure()
         }
     }
 
     fun authorize(requestedAction: String) {
         action = requestedAction
         busy = true
+        if (requestedAction == "sync") status = "Przygotowywanie wysyłki do arkusza…"
         val request = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE))).build()
         client.authorize(request).addOnSuccessListener { response ->
             if (response.hasResolution()) {
@@ -168,38 +210,51 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
             } else authorized(response.accessToken)
         }.addOnFailureListener { error ->
             busy = false
+            recordAuthorizationFailure()
             status = if (error is ApiException) "Błąd rozpoczęcia autoryzacji. Kod Google: ${error.statusCode}." else "Błąd rozpoczęcia autoryzacji (${error.javaClass.simpleName})."
         }
     }
 
-    Column {
-        Text("Google Sheets", style = MaterialTheme.typography.titleLarge)
-        Text("Utworzenie arkusza dodaje nagłówki. Wysłanie danych zapisuje wybrane statystyki w Twoim arkuszu.")
-        Text("Widoczność kolumn i historia nowo wybranych statystyk są aktualizowane podczas synchronizacji.")
-        OutlinedButton(enabled = !busy, onClick = { authorize("check") }) { Text("Sprawdź zgodę Google") }
+    LaunchedEffect(syncRequest) { if (syncRequest > 0 && !busy) authorize("sync") }
+    LaunchedEffect(status) { onStatus(status) }
+    LaunchedEffect(busy) { onBusy(busy) }
+
+    if (visible && showSwitchChoice) AlertDialog(
+        onDismissRequest = { showSwitchChoice = false },
+        title = { Text("Zmienić arkusz?") },
+        text = { Text("Wybierz, czy wysłać do nowego arkusza całą historię zapisaną na telefonie, czy tylko dane oczekujące w kolejce. Dotychczasowy arkusz pozostanie bez zmian.") },
+        confirmButton = { TextButton(onClick = { showSwitchChoice = false; queueAllForSwitch = true; authorize("attach") }) { Text("Cała historia") } },
+        dismissButton = { Column {
+            TextButton(onClick = { showSwitchChoice = false; queueAllForSwitch = false; authorize("attach") }) { Text("Tylko kolejka") }
+            TextButton(onClick = { showSwitchChoice = false }) { Text("Anuluj") }
+        } }
+    )
+    if (visible) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Button(modifier = Modifier.fillMaxWidth(), enabled = !busy && !importBusy, onClick = { authorize("check") }) { Text("Sprawdź zgodę Google") }
         when (val state: SheetState? = sheet) {
             null -> Text("Sprawdzanie ustawień arkusza…")
             else -> when {
                 state.id != null && state.url != null -> {
-                    Text("Arkusz: Health Connect – Daily Sync")
-                    OutlinedButton(onClick = { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(state.url))) }) { Text("Otwórz arkusz") }
-                    Button(enabled = !busy, onClick = { authorize("sync") }) { Text("Wyślij zapisane dane") }
-                    OutlinedButton(enabled = !busy, onClick = { showSheetCheck = !showSheetCheck }) { Text("Sprawdź podłączenie arkusza") }
+                    Text("Połączony arkusz")
+                    Button(modifier = Modifier.fillMaxWidth(), onClick = { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(state.url))) }) { Text("Otwórz arkusz") }
+
+                    Button(modifier = Modifier.fillMaxWidth(), enabled = !busy && !importBusy, onClick = { pendingSheetId = state.id; queueAllForSwitch = false; authorize("attach") }) { Text("Sprawdź dostęp") }
+                    Button(modifier = Modifier.fillMaxWidth(), enabled = !busy && !importBusy, onClick = { showSheetCheck = !showSheetCheck }) { Text("Wybierz inny arkusz") }
                 }
                 else -> {
                     if (state.creationPending) Text("Poprzednia próba mogła utworzyć arkusz. Sprawdź Dysk Google — kolejna próba jest wstrzymana, aby uniknąć duplikatu.")
-                    else Button(enabled = !busy, onClick = { authorize("create") }) { Text("Utwórz arkusz") }
+                    else Button(modifier = Modifier.fillMaxWidth(), enabled = !busy && !importBusy, onClick = { authorize("create") }) { Text("Utwórz arkusz") }
                 }
             }
         }
         if (sheet != null && (sheet?.id == null || showSheetCheck)) {
-            OutlinedTextField(value = sheetReference, onValueChange = { sheetReference = it }, label = { Text("ID lub link istniejącego arkusza") }, singleLine = true, enabled = !busy)
-            OutlinedButton(enabled = !busy, onClick = {
+            OutlinedTextField(value = sheetReference, onValueChange = { sheetReference = it }, label = { Text("ID lub link istniejącego arkusza") }, singleLine = true, enabled = !busy && !importBusy)
+            Button(modifier = Modifier.fillMaxWidth(), enabled = !busy && !importBusy, onClick = {
                 val id = spreadsheetId(sheetReference)
                 if (id == null) status = "Podaj poprawne ID lub link arkusza Google Sheets."
-                else if (sheet?.id != null && sheet?.id != id) status = "Aplikacja ma już podłączony inny arkusz. Zmiana arkusza jest w przygotowaniu."
-                else { pendingSheetId = id; authorize("attach") }
-            }) { Text(if (sheet?.id == null) "Podłącz istniejący arkusz" else "Sprawdź arkusz") }
+                else if (sheet?.id != null && sheet?.id != id) { pendingSheetId = id; showSwitchChoice = true }
+                else { pendingSheetId = id; queueAllForSwitch = false; authorize("attach") }
+            }) { Text("Podłącz arkusz") }
         }
         Text(status)
     }

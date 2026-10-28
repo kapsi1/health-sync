@@ -1,5 +1,7 @@
 .gradle/
+.kotlin/
 .idea/
+.playwright-mcp/
 .tools/
 .gradle-download.zip
 **/build/
