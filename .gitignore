@@ -1,0 +1,8 @@
+.gradle/
+.idea/
+.tools/
+.gradle-download.zip
+**/build/
+local.properties
+*.jks
+*.keystore
