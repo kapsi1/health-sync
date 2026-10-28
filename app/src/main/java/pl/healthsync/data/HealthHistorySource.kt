@@ -36,10 +36,14 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
         }
         return when (metricId) {
             "body_fat" -> {
-                val rows = readAll(BodyFatRecord::class, range.start, range.endExclusive)
-                latestBodyFatByDay(rows.map { BodyFatSample(it.time, it.metadata.id, it.percentage.value) })
-                    .map { (date, sample) -> ImportedValue(date, sample.value) }
+                latest(BodyFatRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.percentage.value) }
             }
+            "hrv_rmssd" -> latest(HeartRateVariabilityRmssdRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.heartRateVariabilityMillis) }
+            "oxygen_saturation" -> latest(OxygenSaturationRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.percentage.value) }
+            "respiratory_rate" -> latest(RespiratoryRateRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.rate) }
+            "body_temperature" -> latest(BodyTemperatureRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.temperature.inCelsius) }
+            "vo2_max" -> latest(Vo2MaxRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.vo2MillilitersPerMinuteKilogram) }
+            "lean_body_mass" -> latest(LeanBodyMassRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.mass.inKilograms) }
             "sleep_duration" -> {
                 val rows = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive)
                 val days = sleepByEndDate(rows.map { SleepInterval(it.startTime, it.endTime) })
@@ -56,6 +60,12 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
                 }
             }
         }
+    }
+
+    private suspend fun <T : Record> latest(type: KClass<T>, range: DateChunk, sample: (T) -> BodyFatSample): List<ImportedValue> {
+        val rows = readAll(type, range.start, range.endExclusive)
+        return latestBodyFatByDay(rows.map(sample))
+            .map { (date, sample) -> ImportedValue(date, sample.value) }
     }
 
     private suspend fun <T : Record> readAll(type: KClass<T>, start: LocalDate, end: LocalDate): List<T> {

@@ -6,6 +6,8 @@ import androidx.health.connect.client.records.*
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import pl.healthsync.data.HealthHistorySource
+import pl.healthsync.domain.DateChunk
 import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import java.time.Period
@@ -24,6 +26,11 @@ class DailyPreview(private val client: HealthConnectClient) {
                 continue
             }
             try {
+                if (metric.id in setOf("hrv_rmssd", "oxygen_saturation", "respiratory_rate", "body_temperature", "vo2_max", "lean_body_mass")) {
+                    val values = HealthHistorySource(client).read(metric.id, DateChunk(start, end))
+                    lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ") { "${it.date}: ${it.value} ${metric.unit}" }}"
+                    continue
+                }
                 if (metric.id == "sleep_duration") {
                     val sessions = readAll(SleepSessionRecord::class, start.minusDays(7), end)
                     val days = sleepByEndDate(sessions.map { SleepInterval(it.startTime, it.endTime) })
