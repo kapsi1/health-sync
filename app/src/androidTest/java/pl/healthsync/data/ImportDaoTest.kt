@@ -91,4 +91,29 @@ class ImportDaoTest {
         queue.acknowledge(current)
         assertTrue(dao.queued().isEmpty())
     }
+    @Test fun manualSessionResumesAndNewSessionInvalidatesAtomically() = runTest {
+        dao.commitChunk(checkpoint, listOf(row))
+        val ranges = listOf("2026-10-01" to "2026-11-01")
+        val started = dao.prepareManualSession("2026-10-01", "2026-11-01", listOf("steps"), ranges)
+        assertEquals("2026-11-01", started.endExclusive)
+        assertTrue(dao.checkpoints("steps").isEmpty())
+        dao.commitChunk(checkpoint, listOf(row))
+        val resumed = dao.prepareManualSession("2026-10-01", "2026-11-02", listOf("steps"), ranges)
+        assertEquals("2026-11-01", resumed.endExclusive)
+        assertEquals(1, dao.checkpoints("steps").size)
+        dao.finishManualSession(started.start, started.endExclusive, started.metricIds)
+        assertNull(dao.manualSession())
+        assertEquals(listOf(row), dao.observations("steps"))
+    }
+
+    @Test fun failedManualSessionCreationDoesNotInvalidateCheckpoint() = runTest {
+        dao.commitChunk(checkpoint, listOf(row))
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER reject_manual BEFORE INSERT ON ManualImportSession BEGIN SELECT RAISE(ABORT, 'test'); END")
+        try {
+            dao.prepareManualSession("2026-10-01", "2026-11-01", listOf("steps"), listOf("2026-10-01" to "2026-11-01"))
+            fail("Expected database error")
+        } catch (_: android.database.sqlite.SQLiteException) { }
+        assertEquals(listOf(checkpoint), dao.checkpoints("steps"))
+        assertNull(dao.manualSession())
+    }
 }

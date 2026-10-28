@@ -207,7 +207,7 @@ class MainActivity : ComponentActivity() {
                     dialog.datePicker.maxDate = today.atStartOfDay(deviceZone).toInstant().toEpochMilli()
                     dialog.show()
                 }, enabled = historyJob == null && !googleBusy, modifier = Modifier.fillMaxWidth()) { Text(displayedDate) }
-                fun startImport(refresh: Boolean) {
+                fun startImport() {
                     val start = try { LocalDate.parse(historyStart) } catch (_: Exception) { historyStatus = "Wpisz poprawną datę w formacie RRRR-MM-DD."; return }
                     val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
                     if (start.year < 1900 || start > today) { historyStatus = "Data musi mieścić się między 1900-01-01 a dzisiaj."; return }
@@ -228,7 +228,7 @@ class MainActivity : ComponentActivity() {
                             if (earliestRead < today.minusDays(28)) {
                                 check(available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) && HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in current) { "Przyznaj zgodę na starszą historię albo wybierz późniejszą datę." }
                             }
-                            importer!!.run(metrics.map { it.id }, start, today.plusDays(1), refresh) { progress ->
+                            importer!!.runManual(metrics.map { it.id }, start, today.plusDays(1)) { progress ->
                                 progressDone = progress.processed
                                 progressTotal = progress.total
                             }
@@ -258,7 +258,7 @@ class MainActivity : ComponentActivity() {
                         missing += HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
                     }
                     if (missing.isNotEmpty()) { pendingPermission = "manual"; launcher.launch(missing) }
-                    else startImport(true)
+                    else startImport()
                 }
                 LaunchedEffect(permissionResult) {
                     if (permissionResult > 0 && pendingPermission == "manual") {
@@ -267,7 +267,7 @@ class MainActivity : ComponentActivity() {
                         val start = LocalDate.parse(historyStart)
                         val earliest = if (metrics.any { it.id == "sleep_duration" }) start.minusDays(7) else start
                         val historyNeeded = earliest < LocalDate.now(ZoneId.of("Europe/Warsaw")).minusDays(28)
-                        if (metrics.all { it.permission in granted } && (!historyNeeded || HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted)) startImport(true)
+                        if (metrics.all { it.permission in granted } && (!historyNeeded || HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted)) startImport()
                         else historyStatus = "Nie przyznano wszystkich wymaganych zgód Health Connect. Sprawdź je i spróbuj ponownie."
                     }
                     if (permissionResult > 0 && pendingPermission == "background") {

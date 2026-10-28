@@ -14,6 +14,8 @@ import org.junit.runner.RunWith
 class DatabaseMigrationTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
+    @Test fun migrationFromVersion3KeepsDailyData() = checkMigration(3)
+
     @Test fun migrationFromVersion1KeepsDailyData() = checkMigration(1)
 
     @Test fun migrationFromVersion2KeepsDailyDataAndLegacySamples() = checkMigration(2)
@@ -38,7 +40,7 @@ class DatabaseMigrationTest {
             }
             legacy.version = version
         } finally { legacy.close() }
-        val migrated = Room.databaseBuilder(context, SyncDatabase::class.java, name).addMigrations(SyncDatabase.MIGRATION_1_2, SyncDatabase.MIGRATION_2_3).build()
+        val migrated = Room.databaseBuilder(context, SyncDatabase::class.java, name).addMigrations(SyncDatabase.MIGRATION_1_2, SyncDatabase.MIGRATION_2_3, SyncDatabase.MIGRATION_3_4).build()
         try {
             assertEquals(0.0, migrated.importDao().observations("steps").single().value, 0.0)
             assertEquals(1, migrated.importDao().queued().size)

@@ -31,6 +31,12 @@ interface HistoryStore {
     suspend fun commit(metricId: String, range: DateChunk, rows: List<ImportedValue>)
 }
 
+interface ManualHistoryStore : HistoryStore {
+    /** Atomically starts a fresh refresh or resumes the matching unfinished session. */
+    suspend fun prepareManual(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate): LocalDate
+    suspend fun finishManual(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate)
+}
+
 private val historyImportLock = Mutex()
 
 class HistoryImport(private val source: HistorySource, private val store: HistoryStore, private val today: () -> LocalDate = { LocalDate.now(java.time.ZoneId.of("Europe/Warsaw")) }) {
@@ -38,16 +44,35 @@ class HistoryImport(private val source: HistorySource, private val store: Histor
     suspend fun run(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate, refresh: Boolean, progress: (ImportProgress) -> Unit) = historyImportLock.withLock {
         require(metricIds.isNotEmpty() && metricIds.distinct().size == metricIds.size)
         val ranges = chunks(start, endExclusive)
-        val total = metricIds.size * ranges.size
-        var processed = 0
         if (refresh) store.invalidateAll(metricIds, ranges)
+        readChunks(metricIds, ranges, refresh, 0, metricIds.size * ranges.size, progress)
+    }
+
+    suspend fun runManual(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate, progress: (ImportProgress) -> Unit) = historyImportLock.withLock {
+        require(metricIds.isNotEmpty() && metricIds.distinct().size == metricIds.size)
+        require(start < endExclusive)
+        val manual = store as? ManualHistoryStore ?: error("Brak obsługi wznawiania importu")
+        val ordered = metricIds.sorted()
+        val sessionEnd = manual.prepareManual(ordered, start, endExclusive)
+        require(sessionEnd > start && sessionEnd <= endExclusive)
+        val original = chunks(start, sessionEnd)
+        val additional = if (sessionEnd < endExclusive) chunks(sessionEnd, endExclusive) else emptyList()
+        val total = ordered.size * (original.size + additional.size)
+        val done = readChunks(ordered, original, false, 0, total, progress, forceLast = sessionEnd < endExclusive)
+        if (additional.isNotEmpty()) readChunks(ordered, additional, false, done, total, progress)
+        manual.finishManual(ordered, start, sessionEnd)
+    }
+
+    private suspend fun readChunks(metricIds: List<String>, ranges: List<DateChunk>, refresh: Boolean, initial: Int, total: Int, progress: (ImportProgress) -> Unit, forceLast: Boolean = false): Int {
+        var processed = initial
         for (metric in metricIds) for (range in ranges) {
-            val skip = !refresh && range.endExclusive <= today() && store.isCompleted(metric, range)
+            val skip = !refresh && !(forceLast && range == ranges.last()) && range.endExclusive <= today() && store.isCompleted(metric, range)
             if (!skip) {
                 val rows = source.read(metric, range)
                 store.commit(metric, range, rows)
             }
             progress(ImportProgress(++processed, total, metric, range, skip))
         }
+        return processed
     }
 }
