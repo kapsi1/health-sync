@@ -34,6 +34,7 @@ import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SheetState
 import pl.healthsync.data.SheetsCreator
 import pl.healthsync.data.SelectedMetricBackfill
+import pl.healthsync.data.HealthChanges
 import androidx.health.connect.client.HealthConnectClient
 
 internal const val DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
@@ -88,8 +89,10 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                     val database = SyncDatabase.get(activity.applicationContext)
                     val gateway = SheetGatewayHttp(sheetId, token)
                     syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), MetricRegistry.all.filter { it.id in selectedSnapshot }.map { it.column }.toSet()) }
+                    var changesAlert: String? = null
                     if (selectedSnapshot.isNotEmpty()) {
                         val client = HealthConnectClient.getOrCreate(activity.applicationContext)
+                        changesAlert = HealthChanges(activity.applicationContext, client, database.importDao()).scan(selectedSnapshot)
                         SelectedMetricBackfill(activity.applicationContext, client, database.importDao()).run(selectedSnapshot) { status = it }
                     }
                     val sync = SheetSync(gateway, RoomPendingQueue(database.importDao(), selectedSnapshot) { MetricSelection(activity.applicationContext).selected.first() }, syncLock)
@@ -103,6 +106,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>) {
                         status = "Wysłano porcje obejmujące $total dni…"
                     } while (rounds < 10)
                     status = if (rounds >= 10) "Wysłano porcje obejmujące $total dni. Uruchom ponownie, aby kontynuować kolejkę." else "Synchronizacja zakończona. Przetworzono $total dni."
+                    if (changesAlert != null) status += " $changesAlert"
                 } catch (e: CancellationException) { throw e }
                 catch (e: SheetHttpError) {
                     status = if (e.code == 401 || e.code == 403) "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto." else "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."

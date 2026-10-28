@@ -10,6 +10,9 @@ import pl.healthsync.domain.SheetNewRow
 import pl.healthsync.domain.SheetSnapshot
 import pl.healthsync.domain.planColumnVisibility
 import pl.healthsync.domain.planSheetMerge
+import pl.healthsync.domain.displayNumberPatterns
+import pl.healthsync.domain.legacyDurationText
+import pl.healthsync.domain.sheetValue
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -17,6 +20,7 @@ import java.net.URLEncoder
 /** One gateway instance is used for one serialized batch. Never logs credentials or responses. */
 class SheetGatewayHttp(private val spreadsheetId: String, private val token: String) : SheetGateway {
     private var headerCount = 0
+    private var headers = emptyList<String>()
     private var hasUnlabeledData = false
     private val spreadsheet = "https://sheets.googleapis.com/v4/spreadsheets/${encode(spreadsheetId)}"
     private val base = "$spreadsheet/values"
@@ -30,7 +34,8 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
             addColumns(missing)
         }
-        val visibility = planColumnVisibility(snapshot.headers + missing, known, selected)
+        val currentHeaders = snapshot.headers + missing
+        val visibility = planColumnVisibility(currentHeaders, known, selected)
         if (visibility.isEmpty()) return
         val meta = call("GET", "$spreadsheet?fields=${encode("sheets.properties(sheetId,title)")}")
         val sheets = meta.getJSONArray("sheets")
@@ -44,13 +49,37 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             val properties = JSONObject().put("hiddenByUser", item.hidden)
             requests.put(JSONObject().put("updateDimensionProperties", JSONObject().put("range", range).put("properties", properties).put("fields", "hiddenByUser")))
         }
+        currentHeaders.forEachIndexed { index, header ->
+            val pattern = displayNumberPatterns[header] ?: return@forEachIndexed
+            val range = JSONObject().put("sheetId", sheetId).put("startRowIndex", 1).put("startColumnIndex", index).put("endColumnIndex", index + 1)
+            val format = JSONObject().put("type", "NUMBER").put("pattern", pattern)
+            val cell = JSONObject().put("userEnteredFormat", JSONObject().put("numberFormat", format))
+            requests.put(JSONObject().put("repeatCell", JSONObject().put("range", range).put("cell", cell).put("fields", "userEnteredFormat.numberFormat")))
+        }
         call("POST", "$spreadsheet:batchUpdate", JSONObject().put("requests", requests))
+        val durationIndex = currentHeaders.indexOf("exercise_hours")
+        if (durationIndex >= 0) migrateDurationColumn(durationIndex + 1)
+    }
+
+    private suspend fun migrateDurationColumn(columnNumber: Int) {
+        val name = column(columnNumber)
+        val range = "'daily'!${name}2:${name}"
+        val response = call("GET", "$base/${encode(range)}?valueRenderOption=FORMULA")
+        val rows = response.optJSONArray("values") ?: return
+        val changes = JSONArray()
+        for (i in 0 until rows.length()) {
+            val value = legacyDurationText(rows.optJSONArray(i)?.opt(0)) ?: continue
+            val cellRange = "'daily'!$name${i + 2}"
+            changes.put(JSONObject().put("range", cellRange).put("values", JSONArray().put(JSONArray().put(value))))
+        }
+        if (changes.length() > 0) call("POST", "$base:batchUpdate", JSONObject().put("valueInputOption", "RAW").put("data", changes))
     }
 
     override suspend fun snapshot(): SheetSnapshot {
         val json = call("GET", "${base}/${encode("'daily'")}")
         val rows = json.optJSONArray("values") ?: JSONArray()
         val header = if (rows.length() == 0) emptyList() else rows.getJSONArray(0).let { a -> (0 until a.length()).map { a.optString(it, "") } }
+        headers = header
         headerCount = header.size
         hasUnlabeledData = (1 until rows.length()).any { i ->
             val row = rows.getJSONArray(i)
@@ -66,6 +95,7 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
         val cells = JSONArray().put(JSONArray(headers))
         val range = "'daily'!${column(headerCount + 1)}1"
         call("PUT", "$base/${encode(range)}?valueInputOption=RAW", JSONObject().put("range", range).put("majorDimension", "ROWS").put("values", cells))
+        this.headers = this.headers + headers
         headerCount += headers.size
     }
 
@@ -74,7 +104,8 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
         val data = JSONArray()
         updates.forEach { update ->
             val cell = "'daily'!${column(update.columnNumber)}${update.rowNumber}"
-            data.put(JSONObject().put("range", cell).put("values", JSONArray().put(JSONArray().put(update.value))))
+            val header = headers.getOrNull(update.columnNumber - 1).orEmpty()
+            data.put(JSONObject().put("range", cell).put("values", JSONArray().put(JSONArray().put(sheetValue(header, update.value)))))
         }
         call("POST", "$base:batchUpdate", JSONObject().put("valueInputOption", "RAW").put("data", data))
     }
@@ -88,7 +119,7 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             for (column in 1..width) {
                 when (column) {
                     1 -> array.put(row.date.toString())
-                    else -> array.put(row.cells[column] ?: "")
+                    else -> array.put(row.cells[column]?.let { sheetValue(headers.getOrNull(column - 1).orEmpty(), it) } ?: "")
                 }
             }
             data.put(array)

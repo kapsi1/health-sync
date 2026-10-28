@@ -31,6 +31,7 @@ import pl.healthsync.data.SheetHttpError
 import pl.healthsync.data.SheetSettings
 import pl.healthsync.data.SyncDatabase
 import pl.healthsync.data.SelectedMetricBackfill
+import pl.healthsync.data.HealthChanges
 import pl.healthsync.domain.HistoryImport
 import pl.healthsync.domain.SheetSync
 import java.io.IOException
@@ -86,6 +87,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             if (metrics.any { it.permission !in granted }) { settings.status("Brakuje zgód Health Connect dla wybranych statystyk."); return Result.success() }
             val db = SyncDatabase.get(applicationContext)
             val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
+            val changesAlert = HealthChanges(applicationContext, client, db.importDao()).scan(selected)
             SelectedMetricBackfill(applicationContext, client, db.importDao()).run(selected)
             if (metrics.isNotEmpty()) HistoryImport(HealthHistorySource(client), RoomHistoryStore(db.importDao())).run(metrics.map { it.id }, today.minusDays(2), today.plusDays(1), true) {}
             val sheetId = SheetSettings(applicationContext).state.first().id
@@ -99,9 +101,9 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             repeat(10) {
                 val count = sync.uploadBatch()
                 total += count
-                if (count == 0) { settings.status("Synchronizacja zakończona: przetworzono $total dni."); return Result.success() }
+                if (count == 0) { settings.status("Synchronizacja zakończona: przetworzono $total dni.${changesAlert?.let { " $it" } ?: ""}"); return Result.success() }
             }
-            settings.status("Przetworzono $total dni; pozostała kolejka zostanie wysłana podczas kolejnej synchronizacji.")
+            settings.status("Przetworzono $total dni; pozostała kolejka zostanie wysłana podczas kolejnej synchronizacji.${changesAlert?.let { " $it" } ?: ""}")
             return Result.success()
         } catch (e: CancellationException) {
             withContext(NonCancellable) { settings.log("Synchronizacja została przerwana.") }
