@@ -1,6 +1,6 @@
 # Google Cloud — konfiguracja testu OAuth
 
-Ta wersja aplikacji pozwala sprawdzić autoryzację `drive.file` i utworzyć arkusz. Nie wysyła jeszcze danych zdrowotnych. Konfiguracja jest prywatna; nie dodawaj kluczy, tokenów ani danych konta do repozytorium.
+Aplikacja korzysta z `drive.file`, tworzy lub podłącza arkusz i synchronizuje do niego wybrane dane zdrowotne. Konfiguracja jest prywatna; nie dodawaj kluczy, tokenów ani danych konta do repozytorium.
 
 1. W [Google Cloud Console](https://console.cloud.google.com/) utwórz lub wybierz własny projekt.
 2. W **APIs & Services → Library** włącz **Google Sheets API**.
