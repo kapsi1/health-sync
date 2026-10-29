@@ -24,6 +24,7 @@ object MetricRegistry {
         Metric("body_temperature", "Temperatura ciała — ostatni pomiar", "°C", "Parametry życiowe", "body_temperature_c", HealthPermission.getReadPermission(BodyTemperatureRecord::class)),
         Metric("vo2_max", "VO₂ max — ostatni pomiar", "ml/kg/min", "Parametry życiowe", "vo2_max", HealthPermission.getReadPermission(Vo2MaxRecord::class)),
         Metric("sleep_duration", "Czas snu", "godz.", "Sen", "sleep_hours", HealthPermission.getReadPermission(SleepSessionRecord::class)),
+        Metric("sleep_awake", "Czas wybudzeń podczas snu", "godz.", "Sen", "sleep_awake_hours", HealthPermission.getReadPermission(SleepSessionRecord::class)),
         Metric("weight_avg", "Średnia masa ciała", "kg", "Ciało", "weight_avg_kg", HealthPermission.getReadPermission(WeightRecord::class)),
         Metric("body_fat", "Tkanka tłuszczowa — ostatni pomiar", "%", "Ciało", "body_fat_percent", HealthPermission.getReadPermission(BodyFatRecord::class)),
         Metric("lean_body_mass", "Beztłuszczowa masa ciała — ostatni pomiar", "kg", "Ciało", "lean_body_mass_kg", HealthPermission.getReadPermission(LeanBodyMassRecord::class)),

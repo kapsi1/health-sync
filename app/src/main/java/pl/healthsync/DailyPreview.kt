@@ -31,15 +31,17 @@ class DailyPreview(private val client: HealthConnectClient) {
                     lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ") { "${it.date}: ${it.value} ${metric.unit}" }}"
                     continue
                 }
-                if (metric.id == "sleep_duration") {
+                if (metric.id in sleepMetricIds) {
                     val sessions = readAll(SleepSessionRecord::class, start.minusDays(7), end)
-                    val days = sleepByEndDate(sessions.map { SleepInterval(it.startTime, it.endTime) })
+                    val days = sleepByEndDate(sessions.map { it.toSleepInterval() })
                         .filterKeys { it >= start && it < end }
                     val values = days.map { (date, day) ->
+                        val duration = if (metric.id == "sleep_awake") day.awakeDuration else day.duration
                         if (day.overlapping) "$date: nakładające się sesje — brak wyniku"
-                        else "$date: ${day.duration!!.toMinutes() / 60.0} godz."
+                        else if (duration == null) "$date: brak kompletnych faz snu — brak wyniku"
+                        else "$date: ${duration.toMinutes() / 60.0} godz."
                     }
-                    lines += "Czas sesji snu: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ")}. Całą sesję przypisano do daty zakończenia; czas obejmuje także ewentualne przebudzenia."
+                    lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ")}. Data zakończenia sesji; sen bez czuwania, wybudzenia tylko pomiędzy fazami snu."
                     continue
                 }
                 if (metric.id == "body_fat") {

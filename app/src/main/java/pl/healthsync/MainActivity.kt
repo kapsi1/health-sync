@@ -263,7 +263,7 @@ class MainActivity : ComponentActivity() {
                             val current = client.permissionController.getGrantedPermissions()
                             granted = current
                             check(metrics.all { it.permission in current }) { "Przyznaj zgody dla wszystkich wybranych statystyk." }
-                            val earliestRead = if (metrics.any { it.id == "sleep_duration" }) start.minusDays(7) else start
+                            val earliestRead = if (metrics.any { it.id in sleepMetricIds }) start.minusDays(7) else start
                             if (earliestRead < today.minusDays(28)) {
                                 check(available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) && HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in current) { "Przyznaj zgodę na starszą historię albo wybierz późniejszą datę." }
                             }
@@ -290,7 +290,7 @@ class MainActivity : ComponentActivity() {
                     val metrics = MetricRegistry.all.filter { it.id in selected }
                     val start = LocalDate.parse(historyStart)
                     val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
-                    val earliest = if (metrics.any { it.id == "sleep_duration" }) start.minusDays(7) else start
+                    val earliest = if (metrics.any { it.id in sleepMetricIds }) start.minusDays(7) else start
                     val missing = metrics.map { it.permission }.filterNot { it in granted }.toMutableSet()
                     if (earliest < today.minusDays(28) && HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY !in granted) {
                         if (!available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY)) { historyStatus = "Odczyt starszej historii nie jest dostępny na tym urządzeniu."; return }
@@ -304,7 +304,7 @@ class MainActivity : ComponentActivity() {
                         pendingPermission = ""
                         val metrics = MetricRegistry.all.filter { it.id in selected }
                         val start = LocalDate.parse(historyStart)
-                        val earliest = if (metrics.any { it.id == "sleep_duration" }) start.minusDays(7) else start
+                        val earliest = if (metrics.any { it.id in sleepMetricIds }) start.minusDays(7) else start
                         val historyNeeded = earliest < LocalDate.now(ZoneId.of("Europe/Warsaw")).minusDays(28)
                         if (metrics.all { it.permission in granted } && (!historyNeeded || HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted)) startImport()
                         else historyStatus = "Nie przyznano wszystkich wymaganych zgód Health Connect. Sprawdź je i spróbuj ponownie."

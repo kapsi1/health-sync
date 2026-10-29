@@ -11,7 +11,8 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import pl.healthsync.BodyFatSample
 import pl.healthsync.MetricRegistry
-import pl.healthsync.SleepInterval
+import pl.healthsync.sleepMetricIds
+import pl.healthsync.toSleepInterval
 import pl.healthsync.latestBodyFatByDay
 import pl.healthsync.sleepByEndDate
 import pl.healthsync.domain.DateChunk
@@ -29,7 +30,7 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
         val metric = MetricRegistry.all.single { it.id == metricId }
         val granted = client.permissionController.getGrantedPermissions()
         check(metric.permission in granted) { "Brak zgody na odczyt: ${metric.label}" }
-        val earliestRead = if (metricId == "sleep_duration") range.start.minusDays(7) else range.start
+        val earliestRead = if (metricId in sleepMetricIds) range.start.minusDays(7) else range.start
         if (earliestRead < LocalDate.now(zone).minusDays(28)) {
             check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE &&
                 HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted) { "Brak dostępu do starszej historii" }
@@ -44,12 +45,15 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
             "body_temperature" -> latest(BodyTemperatureRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.temperature.inCelsius) }
             "vo2_max" -> latest(Vo2MaxRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.vo2MillilitersPerMinuteKilogram) }
             "lean_body_mass" -> latest(LeanBodyMassRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.mass.inKilograms) }
-            "sleep_duration" -> {
+            "sleep_duration", "sleep_awake" -> {
                 val rows = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive)
-                val days = sleepByEndDate(rows.map { SleepInterval(it.startTime, it.endTime) })
+                val days = sleepByEndDate(rows.map { it.toSleepInterval() })
                     .filterKeys { it >= range.start && it < range.endExclusive }
                 check(days.values.none { it.overlapping }) { "Nakładające się sesje snu wymagają rozstrzygnięcia" }
-                days.map { (date, day) -> ImportedValue(date, day.duration!!.toMillis() / 3_600_000.0) }
+                days.mapNotNull { (date, day) ->
+                    val duration = if (metricId == "sleep_awake") day.awakeDuration else day.duration
+                    duration?.let { ImportedValue(date, it.toMillis() / 3_600_000.0) }
+                }
             }
             else -> {
                 val aggregate = aggregateFor(metricId)

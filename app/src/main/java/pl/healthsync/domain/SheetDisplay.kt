@@ -11,7 +11,7 @@ fun durationAsText(hours: Double): String {
     return String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
 }
 
-val durationColumns = setOf("exercise_hours", "sleep_hours")
+val durationColumns = setOf("exercise_hours", "sleep_hours", "sleep_awake_hours")
 
 /** Round only at the export boundary; local observations retain their source precision. */
 fun sheetValue(columnName: String, value: Double): Any {

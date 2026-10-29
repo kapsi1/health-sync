@@ -1,6 +1,6 @@
 # Architektura Health Sync
 
-Health Connect jest obecnie jedynym zaimplementowanym źródłem synchronizacji. Aplikacja odczytuje dostępne, wybrane statystyki i przelicza je na dni w strefie `Europe/Warsaw`; nie pobiera historii przechowywanej wyłącznie w Google Health/Fitbit. Import Takeout i Google Health API są rozważane; wybór źródła i reguł konfliktów pozostaje otwarty.
+Health Connect jest obecnie jedynym zaimplementowanym źródłem synchronizacji. Aplikacja odczytuje dostępne, wybrane statystyki i przelicza je na dni w strefie `Europe/Warsaw`; nie pobiera historii przechowywanej wyłącznie w Google Health/Fitbit. Docelowo Connect pozostaje podstawowym źródłem prawdy po uzupełnieniu historii z Takeout przez aplikację mobilną. Plan obejmuje osobne wzbogacanie arkusza o zatwierdzone dodatkowe pola API, jednorazowy desktopowy import tych samych pól z Takeout oraz niezależny proces odżywiania z innego arkusza do Connect. Żadna z tych czterech nowych funkcji nie jest zaimplementowana; przed rozpoczęciem każdej z nich trzeba zapytać użytkownika i uzyskać zgodę. Zakres i kolejność opisuje `health_connect_sheets_agent_plan.md`. Sleep score jest wyłączony ze względu na brak równoważnego pola API.
 
 ## Przepływ danych
 
@@ -12,7 +12,9 @@ Health Connect jest obecnie jedynym zaimplementowanym źródłem synchronizacji.
 
 Operacje na arkuszu są serializowane między synchronizacją ręczną, tłem i zmianą pliku. Kolejność kolumn jest ustalana na podstawie nagłówków. Kolumny wyłączonych statystyk są ukrywane, a po włączeniu dodawane albo odkrywane; pozostałe zakładki i kolumny pozostają pod kontrolą użytkownika.
 
-Eksport zaokrągla wartości liczbowe do maksymalnie dwóch miejsc dziesiętnych przed wysłaniem przez API; Room zachowuje pełną precyzję. Format kolumn jest tylko uzupełnieniem prezentacji. `exercise_hours` i `sleep_hours` są zapisywane jako tekst `hh:mm:ss`, z godzinami bez zawijania po 24. Dawne liczbowe czasy są konwertowane przy uzgadnianiu kolumn, bez zmiany tekstów i formuł. Obecnie czas snu oznacza pełną długość sesji przypisaną do dnia jej końca, a nie sumę samych faz snu; ujednolicenie definicji ze źródłami zewnętrznymi jest w planie.
+Eksport zaokrągla wartości liczbowe do maksymalnie dwóch miejsc dziesiętnych przed wysłaniem przez API; Room zachowuje pełną precyzję. Format kolumn jest tylko uzupełnieniem prezentacji. `exercise_hours`, `sleep_hours` i `sleep_awake_hours` są zapisywane jako tekst `hh:mm:ss`, z godzinami bez zawijania po 24. Dawne liczbowe czasy są konwertowane przy uzgadnianiu kolumn, bez zmiany tekstów i formuł.
+
+`sleep_hours` sumuje fazy SLEEPING/LIGHT/DEEP/REM. Opcjonalne `sleep_awake_hours` sumuje AWAKE/AWAKE_IN_BED/OUT_OF_BED tylko między pierwszą i ostatnią fazą snu w danej sesji, bez minimalnej długości ponownego snu. Zasypianie i końcowe czuwanie są wyłączone. Oba wyniki sumuje się dla sesji zakończonych danego dnia w Europe/Warsaw. Luka między oddzielnymi sesjami nie jest automatycznie traktowana jako czuwanie. Brak faz, nieznane fazy, luki, nieprawidłowe przedziały i nakładające się fazy nie są zgadywane. Pełny czas snu wymaga kompletnej osi faz sesji; wybudzenia mogą być dostępne przy kompletnych fazach wewnętrznych mimo nieznanych brzegów. Gdy jednej sesji brakuje wyniku, nie eksportujemy częściowej sumy jako pełnej statystyki dobowej. Nakładające się sesje wciąż powodują błąd wymagający rozstrzygnięcia, zamiast podwójnego liczenia. Brak nowego wyniku nie usuwa starych danych z Room/Sheets; dawne wartości liczące pełną sesję wymagają ponownego importu, a przy niekompletnych fazach mogą pozostać do ręcznego wyjaśnienia.
 
 ## Dostęp i diagnostyka
 

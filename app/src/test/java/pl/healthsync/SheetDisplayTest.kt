@@ -25,6 +25,7 @@ class SheetDisplayTest {
         assertEquals("00:30:00", sheetValue("exercise_hours", 0.5))
         assertEquals("07:30:00", sheetValue("sleep_hours", 7.5))
         assertEquals("25:00:00", sheetValue("sleep_hours", 25.0))
+        assertEquals("00:40:00", sheetValue("sleep_awake_hours", 40.0 / 60))
     }
     @Test(expected = IllegalArgumentException::class) fun rejectsNonFiniteExport() {
         sheetValue("weight_avg_kg", Double.NaN)

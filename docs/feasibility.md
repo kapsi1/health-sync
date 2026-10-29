@@ -1,5 +1,7 @@
 # Weryfikacja M0
 
+Poniżej zachowano historyczny przebieg weryfikacji. Aktualny stan i zakres opisują `health_connect_sheets_agent_plan.md` i `test-results.md`. Aktualizacja 29.10.2026: poprawiono sen na sumę faz bez czuwania i dodano osobny czas wybudzeń; build i 49 testów jednostkowych przeszły, test urządzenia pozostaje do wykonania. Import Takeout do Connect, desktopowe wzbogacenie arkusza, API i odżywianie są zaplanowane, a każda nowa sekcja wymaga zapytania użytkownika przed implementacją. Dawne wzmianki o pełnym czasie sesji i wstrzymaniu Takeout odnoszą się do wcześniejszych etapów.
+
 Wersja diagnostyczna sprawdza dostępność Health Connect, funkcji historii i odczytu w tle oraz obecność próbek kroków i całkowitych kalorii z ostatnich 30 dni. Wyświetla źródła tylko z pierwszej strony maksymalnie 100 rekordów; nie jest to pełny import.
 
 - 2026-10-28: `assembleDebug` zakończyło się poprawnie; debug APK zainstalowano i uruchomiono na Pixelu przez ADB. Użytkownik potwierdził działanie diagnostyki; dokładne wyniki dostępności i źródła danych nie zostały przekazane.
