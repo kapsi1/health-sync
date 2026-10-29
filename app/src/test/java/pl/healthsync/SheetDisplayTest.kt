@@ -16,8 +16,10 @@ class SheetDisplayTest {
     }
     @Test fun exportsRoundedNumbersAndBothDurations() {
         assertEquals(12.35, sheetValue("distance_km", 12.34567))
-        assertEquals(1234.57, sheetValue("total_kcal", 1234.5678))
-        assertEquals(123.45, sheetValue("active_kcal", 123.454))
+        assertEquals(1235.0, sheetValue("total_kcal", 1234.5678))
+        assertEquals(123.0, sheetValue("active_kcal", 123.454))
+        assertEquals(124.0, sheetValue("active_kcal", 123.5))
+        assertEquals(0.0, sheetValue("total_kcal", 0.49))
         assertEquals(72.13, sheetValue("weight_avg_kg", 72.125))
         assertEquals(72.0, sheetValue("weight_avg_kg", 72.0000000000001))
         assertEquals(-1.24, sheetValue("body_temperature_c", -1.235))

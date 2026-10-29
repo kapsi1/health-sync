@@ -26,7 +26,7 @@ class DailyPreview(private val client: HealthConnectClient) {
                 continue
             }
             try {
-                if (metric.id in setOf("hrv_rmssd", "oxygen_saturation", "respiratory_rate", "body_temperature", "vo2_max", "lean_body_mass")) {
+                if (metric.id in setOf("hrv_rmssd", "oxygen_saturation", "respiratory_rate", "body_temperature", "vo2_max", "lean_body_mass", "body_fat")) {
                     val values = HealthHistorySource(client).read(metric.id, DateChunk(start, end))
                     lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ") { "${it.date}: ${it.value} ${metric.unit}" }}"
                     continue
@@ -42,15 +42,6 @@ class DailyPreview(private val client: HealthConnectClient) {
                         else "$date: ${duration.toMinutes() / 60.0} godz."
                     }
                     lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ")}. Data zakończenia sesji; sen bez czuwania, wybudzenia tylko pomiędzy fazami snu."
-                    continue
-                }
-                if (metric.id == "body_fat") {
-                    val records = readAll(BodyFatRecord::class, start, end)
-                    val days = latestBodyFatByDay(records.map { BodyFatSample(it.time, it.metadata.id, it.percentage.value) })
-                    val values = days.map { (date, latest) -> "$date: ${latest.value} %" }
-                    val sources = records.map { it.metadata.dataOrigin.packageName }.distinct()
-                    val warning = if (sources.size > 1) " Pomiar wybierany ze wszystkich źródeł; możliwe duplikaty." else ""
-                    lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ")}$warning"
                     continue
                 }
                 val aggregate = metricFor(metric.id) ?: continue

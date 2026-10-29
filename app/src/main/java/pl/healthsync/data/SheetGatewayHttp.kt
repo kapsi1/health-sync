@@ -10,10 +10,12 @@ import pl.healthsync.domain.SheetNewRow
 import pl.healthsync.domain.SheetSnapshot
 import pl.healthsync.domain.planColumnVisibility
 import pl.healthsync.domain.planSheetMerge
-import pl.healthsync.domain.displayNumberPatterns
+import pl.healthsync.domain.numericColumns
+import pl.healthsync.domain.integerColumns
 import pl.healthsync.domain.durationColumns
 import pl.healthsync.domain.legacyDurationText
 import pl.healthsync.domain.sheetValue
+import pl.healthsync.MetricRegistry
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -22,6 +24,7 @@ import java.net.URLEncoder
 class SheetGatewayHttp(private val spreadsheetId: String, private val token: String) : SheetGateway {
     private var headerCount = 0
     private var headers = emptyList<String>()
+    private var visibleHeaders = emptyList<String>()
     private var hasUnlabeledData = false
     private var dailySheetId: Int? = null
     private val spreadsheet = "https://sheets.googleapis.com/v4/spreadsheets/${encode(spreadsheetId)}"
@@ -35,8 +38,9 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
         planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())
         require(selected.all { it in known })
         val missing = selected.filterNot { it in snapshot.headers }.sorted()
+        if (missing.isNotEmpty()) check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
+        renameManagedHeaders(snapshot.headers)
         if (missing.isNotEmpty()) {
-            check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
             addColumns(missing)
         }
         val currentHeaders = snapshot.headers + missing
@@ -56,15 +60,27 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             requests.put(JSONObject().put("updateDimensionProperties", JSONObject().put("range", range).put("properties", properties).put("fields", "hiddenByUser")))
         }
         currentHeaders.forEachIndexed { index, header ->
-            val pattern = displayNumberPatterns[header] ?: return@forEachIndexed
-            val range = JSONObject().put("sheetId", sheetId).put("startRowIndex", 1).put("startColumnIndex", index).put("endColumnIndex", index + 1)
-            val format = JSONObject().put("type", "NUMBER").put("pattern", pattern)
-            val cell = JSONObject().put("userEnteredFormat", JSONObject().put("numberFormat", format))
-            requests.put(JSONObject().put("repeatCell", JSONObject().put("range", range).put("cell", cell).put("fields", "userEnteredFormat.numberFormat")))
+            if (header in integerColumns) requests.put(integerNumberFormatRequest(sheetId, index))
+            else if (header in numericColumns) requests.put(resetNumberFormatRequest(sheetId, index))
         }
         call("POST", "$spreadsheet:batchUpdate", JSONObject().put("requests", requests))
         currentHeaders.forEachIndexed { index, header ->
             if (header in durationColumns) migrateDurationColumn(index + 1)
+        }
+    }
+
+    private suspend fun renameManagedHeaders(canonical: List<String>) {
+        val data = JSONArray()
+        canonical.forEachIndexed { index, id ->
+            val label = MetricRegistry.sheetHeaders.label(id)
+            if (label != visibleHeaders[index]) {
+                val range = "'daily'!${column(index + 1)}1"
+                data.put(JSONObject().put("range", range).put("values", JSONArray().put(JSONArray().put(label))))
+            }
+        }
+        if (data.length() > 0) {
+            call("POST", "$base:batchUpdate", JSONObject().put("valueInputOption", "RAW").put("data", data))
+            visibleHeaders = canonical.map(MetricRegistry.sheetHeaders::label)
         }
     }
 
@@ -85,7 +101,11 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
     override suspend fun snapshot(): SheetSnapshot {
         val json = call("GET", "${base}/${encode("'daily'")}")
         val rows = json.optJSONArray("values") ?: JSONArray()
-        val header = if (rows.length() == 0) emptyList() else rows.getJSONArray(0).let { a -> (0 until a.length()).map { a.optString(it, "") } }
+        val displayed = if (rows.length() == 0) emptyList() else rows.getJSONArray(0).let { a -> (0 until a.length()).map { a.optString(it, "") } }
+        val headerRows = call("GET", "$base/${encode("'daily'!1:1")}?valueRenderOption=FORMULA").optJSONArray("values")
+        val formulas = if (headerRows == null || headerRows.length() == 0) emptyList() else headerRows.getJSONArray(0).let { a -> (0 until a.length()).map { a.optString(it, "") } }
+        val header = MetricRegistry.sheetHeaders.resolve(displayed, formulas)
+        visibleHeaders = displayed
         headers = header
         headerCount = header.size
         hasUnlabeledData = (1 until rows.length()).any { i ->
@@ -99,10 +119,11 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
     override suspend fun addColumns(headers: List<String>) {
         if (headers.isEmpty()) return
         check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
-        val cells = JSONArray().put(JSONArray(headers))
+        val cells = JSONArray().put(JSONArray(headers.map(MetricRegistry.sheetHeaders::label)))
         val range = "'daily'!${column(headerCount + 1)}1"
         call("PUT", "$base/${encode(range)}?valueInputOption=RAW", JSONObject().put("range", range).put("majorDimension", "ROWS").put("values", cells))
         this.headers = this.headers + headers
+        this.visibleHeaders = this.visibleHeaders + headers.map(MetricRegistry.sheetHeaders::label)
         headerCount += headers.size
     }
 
@@ -162,6 +183,24 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             if (text.isBlank()) JSONObject() else JSONObject(text)
         } finally { conn.disconnect() }
     }
+}
+
+/** Clear the custom number format, letting Sheets display stored rounded numbers automatically. */
+internal fun resetNumberFormatRequest(sheetId: Int, columnIndex: Int): JSONObject {
+    val range = JSONObject().put("sheetId", sheetId).put("startRowIndex", 1)
+        .put("startColumnIndex", columnIndex).put("endColumnIndex", columnIndex + 1)
+    return JSONObject().put("repeatCell", JSONObject().put("range", range)
+        .put("cell", JSONObject()).put("fields", "userEnteredFormat.numberFormat"))
+}
+
+/** Old calorie cells display whole numbers; new exports are rounded before writing. */
+internal fun integerNumberFormatRequest(sheetId: Int, columnIndex: Int): JSONObject {
+    val range = JSONObject().put("sheetId", sheetId).put("startRowIndex", 1)
+        .put("startColumnIndex", columnIndex).put("endColumnIndex", columnIndex + 1)
+    val format = JSONObject().put("type", "NUMBER").put("pattern", "0")
+    val cell = JSONObject().put("userEnteredFormat", JSONObject().put("numberFormat", format))
+    return JSONObject().put("repeatCell", JSONObject().put("range", range)
+        .put("cell", cell).put("fields", "userEnteredFormat.numberFormat"))
 }
 
 /** Sort all columns together, excluding the header; open ends include user-added columns. */

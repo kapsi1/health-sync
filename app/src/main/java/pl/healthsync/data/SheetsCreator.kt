@@ -35,7 +35,8 @@ class SheetsCreator {
 }
 
 internal fun createSheetPayload(selected: Set<String>): JSONObject {
-    val headers = listOf("date") + MetricRegistry.all.filter { it.id in selected }.map { it.column }
+    val headers = (listOf("date") + MetricRegistry.all.filter { it.id in selected }.map { it.column })
+        .map(MetricRegistry.sheetHeaders::label)
     val values = JSONArray()
     headers.forEach { values.put(JSONObject().put("userEnteredValue", JSONObject().put("stringValue", it))) }
     val sheet = JSONObject()

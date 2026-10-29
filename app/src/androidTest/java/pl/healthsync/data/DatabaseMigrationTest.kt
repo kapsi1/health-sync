@@ -20,6 +20,8 @@ class DatabaseMigrationTest {
 
     @Test fun migrationFromVersion2KeepsDailyDataAndLegacySamples() = checkMigration(2)
 
+    @Test fun migrationFromVersion4PreservesLastSamplesAsArchive() = checkMigration(4)
+
     private fun checkMigration(version: Int) = runTest {
         val name = "health-sync-migration-test.db"
         context.deleteDatabase(name)
@@ -33,6 +35,9 @@ class DatabaseMigrationTest {
             legacy.execSQL("INSERT INTO DailyObservation VALUES ('2026-10-28', 'steps', 0, 'kroki', '2026-10-28T10:00:00Z')")
             legacy.execSQL("INSERT INTO UploadQueue VALUES ('2026-10-28', 1)")
             legacy.execSQL("INSERT INTO ImportCheckpoint VALUES ('steps', '2026-10-01', '2026-11-01', '2026-11-01T00:00:00Z')")
+            legacy.execSQL("INSERT INTO DailyObservation VALUES ('2026-10-28', 'body_fat', 20.5, '%', '2026-10-28T10:00:00Z')")
+            legacy.execSQL("INSERT INTO ImportCheckpoint VALUES ('body_fat', '2026-10-01', '2026-11-01', '2026-11-01T00:00:00Z')")
+            if (version >= 4) legacy.execSQL("CREATE TABLE IF NOT EXISTS `ManualImportSession` (`id` INTEGER NOT NULL, `start` TEXT NOT NULL, `endExclusive` TEXT NOT NULL, `metricIds` TEXT NOT NULL, PRIMARY KEY(`id`))")
             if (version == 2) {
                 legacy.execSQL("CREATE TABLE `HeartSample` (`recordId` TEXT NOT NULL, `timeUtc` TEXT NOT NULL, `ordinal` INTEGER NOT NULL, `localDate` TEXT NOT NULL, `sourcePackage` TEXT NOT NULL, `bpm` INTEGER NOT NULL, `dirty` INTEGER NOT NULL, PRIMARY KEY(`recordId`, `timeUtc`, `ordinal`))")
                 legacy.execSQL("CREATE TABLE `HeartChunkCheckpoint` (`rangeStart` TEXT NOT NULL, `rangeEndExclusive` TEXT NOT NULL, `finishedAtUtc` TEXT NOT NULL, PRIMARY KEY(`rangeStart`, `rangeEndExclusive`))")
@@ -40,11 +45,15 @@ class DatabaseMigrationTest {
             }
             legacy.version = version
         } finally { legacy.close() }
-        val migrated = Room.databaseBuilder(context, SyncDatabase::class.java, name).addMigrations(SyncDatabase.MIGRATION_1_2, SyncDatabase.MIGRATION_2_3, SyncDatabase.MIGRATION_3_4).build()
+        val migrated = Room.databaseBuilder(context, SyncDatabase::class.java, name).addMigrations(SyncDatabase.MIGRATION_1_2, SyncDatabase.MIGRATION_2_3, SyncDatabase.MIGRATION_3_4, SyncDatabase.MIGRATION_4_5).build()
         try {
             assertEquals(0.0, migrated.importDao().observations("steps").single().value, 0.0)
             assertEquals(1, migrated.importDao().queued().size)
             assertEquals(1, migrated.importDao().checkpoints("steps").size)
+            assertTrue(migrated.importDao().observations("body_fat").isEmpty())
+            assertEquals(20.5, migrated.importDao().observations("legacy_last:body_fat").single().value, 0.0)
+            assertEquals(1, migrated.importDao().checkpoints("legacy_last:body_fat").size)
+            assertTrue(migrated.importDao().checkpoints("body_fat").isEmpty())
             if (version == 2) {
                 migrated.openHelper.readableDatabase.query("SELECT COUNT(*) FROM HeartSample").use { cursor ->
                     assertTrue(cursor.moveToFirst())

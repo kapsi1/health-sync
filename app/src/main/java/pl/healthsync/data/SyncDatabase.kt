@@ -122,7 +122,7 @@ abstract class ImportDao {
     }
 }
 
-@Database(entities = [DailyObservation::class, ImportCheckpoint::class, UploadQueue::class, ManualImportSession::class], version = 4, exportSchema = false)
+@Database(entities = [DailyObservation::class, ImportCheckpoint::class, UploadQueue::class, ManualImportSession::class], version = 5, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
     abstract fun importDao(): ImportDao
 
@@ -142,10 +142,18 @@ abstract class SyncDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `ManualImportSession` (`id` INTEGER NOT NULL, `start` TEXT NOT NULL, `endExclusive` TEXT NOT NULL, `metricIds` TEXT NOT NULL, PRIMARY KEY(`id`))")
             }
         }
+        // Preserve old last-measurement values without ever treating them as daily averages.
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val ids = "'hrv_rmssd','oxygen_saturation','respiratory_rate','body_temperature','vo2_max','body_fat','lean_body_mass'"
+                db.execSQL("UPDATE DailyObservation SET metricId = 'legacy_last:' || metricId WHERE metricId IN ($ids)")
+                db.execSQL("UPDATE ImportCheckpoint SET metricId = 'legacy_last:' || metricId WHERE metricId IN ($ids)")
+            }
+        }
         @Volatile private var instance: SyncDatabase? = null
         fun get(context: Context): SyncDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, SyncDatabase::class.java, "health-sync.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build().also { instance = it }
         }
     }

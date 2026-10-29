@@ -108,7 +108,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             val token = googleToken()
             if (token == null) { record("Dane zapisano lokalnie. Otwórz aplikację i ponownie przyznaj zgodę Google.", error = true); return Result.success() }
             val gateway = SheetGatewayHttp(sheetId, token)
-            syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), metrics.map { it.column }.toSet()) }
+            syncLock.withLock { gateway.reconcileColumns(MetricRegistry.managedColumns, metrics.map { it.column }.toSet()) }
             val sync = SheetSync(gateway, RoomPendingQueue(db.importDao(), selected) { MetricSelection(applicationContext).selected.first() }, syncLock)
             var total = SheetBatchResult(0, 0)
             repeat(10) {
@@ -131,6 +131,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             record("Błąd Google Sheets (${e.code}); kolejka jest zachowana.", error = true)
             return if (e.code == 429 || e.code >= 500) Result.retry() else Result.success()
         } catch (_: IOException) { record("Brak połączenia. Dane lokalne i kolejka są zachowane; ponowimy próbę.", error = true); return Result.retry() }
+        catch (_: IllegalArgumentException) { record("Nieprawidłowe nagłówki lub daty w arkuszu. Sprawdź zakładkę daily i usuń powtórzone nazwy; kolejka jest zachowana.", error = true); return Result.success() }
         catch (_: IllegalStateException) { record("Nie ukończono importu historii. Sprawdź zgody Health Connect; import można wznowić.", error = true); return Result.success() }
         catch (_: Exception) { record("Synchronizacja zatrzymana. Otwórz aplikację i sprawdź zgody oraz dane.", error = true); return Result.success() }
     }

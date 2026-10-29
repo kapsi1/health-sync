@@ -9,6 +9,23 @@ import pl.healthsync.MetricRegistry
 
 @RunWith(AndroidJUnit4::class)
 class SheetsCreatorTest {
+    @Test fun calorieFormatDisplaysIntegersWithoutChangingValues() {
+        val request = integerNumberFormatRequest(42, 2).getJSONObject("repeatCell")
+        assertEquals("userEnteredFormat.numberFormat", request.getString("fields"))
+        val format = request.getJSONObject("cell").getJSONObject("userEnteredFormat").getJSONObject("numberFormat")
+        assertEquals("NUMBER", format.getString("type"))
+        assertEquals("0", format.getString("pattern"))
+        assertEquals(1, request.getJSONObject("range").getInt("startRowIndex"))
+    }
+    @Test fun resetNumberFormatDoesNotChangeValuesOrOtherFormatting() {
+        val request = resetNumberFormatRequest(42, 3).getJSONObject("repeatCell")
+        assertEquals("userEnteredFormat.numberFormat", request.getString("fields"))
+        assertEquals(0, request.getJSONObject("cell").length())
+        val range = request.getJSONObject("range")
+        assertEquals(1, range.getInt("startRowIndex"))
+        assertEquals(3, range.getInt("startColumnIndex"))
+        assertEquals(4, range.getInt("endColumnIndex"))
+    }
     @Test fun spreadsheetHasExpectedTimezoneAndHeaders() {
         val payload = createSheetPayload(setOf("steps", "weight_avg"))
         assertEquals("Europe/Warsaw", payload.getJSONObject("properties").getString("timeZone"))
@@ -16,7 +33,7 @@ class SheetsCreatorTest {
         assertEquals("daily", sheet.getJSONObject("properties").getString("title"))
         val values = sheet.getJSONArray("data").getJSONObject(0).getJSONArray("rowData").getJSONObject(0).getJSONArray("values")
         val headers = (0 until values.length()).map { values.getJSONObject(it).getJSONObject("userEnteredValue").getString("stringValue") }
-        assertEquals(listOf("date", "steps", "weight_avg_kg"), headers)
+        assertEquals(listOf("Data", "Kroki", "Waga kg"), headers)
     }
     @Test fun sortKeepsHeaderAndIncludesUserColumns() {
         val sort = dateSortRequest(42).getJSONArray("requests").getJSONObject(0).getJSONObject("sortRange")

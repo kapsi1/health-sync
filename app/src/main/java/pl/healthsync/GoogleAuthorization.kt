@@ -128,7 +128,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Bool
                     check(settings.state.first().id == sheetId) { "Arkusz zmienił się; uruchom synchronizację ponownie" }
                     val database = SyncDatabase.get(activity.applicationContext)
                     val gateway = SheetGatewayHttp(sheetId, token)
-                    syncLock.withLock { gateway.reconcileColumns(MetricRegistry.all.map { it.column }.toSet(), MetricRegistry.all.filter { it.id in selectedSnapshot }.map { it.column }.toSet()) }
+                    syncLock.withLock { gateway.reconcileColumns(MetricRegistry.managedColumns, MetricRegistry.all.filter { it.id in selectedSnapshot }.map { it.column }.toSet()) }
                     var changesAlert: String? = null
                     if (selectedSnapshot.isNotEmpty()) {
                         val client = HealthConnectClient.getOrCreate(activity.applicationContext)
@@ -157,6 +157,9 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Bool
                         else -> "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
                     }
                     failure = status
+                } catch (e: IllegalArgumentException) {
+                    failure = "Nieprawidłowe nagłówki lub daty w arkuszu. Sprawdź zakładkę daily i usuń powtórzone nazwy."
+                    status = failure!!
                 } catch (e: IllegalStateException) {
                     failure = "Nie ukończono synchronizacji. Sprawdź wybór danych i zgody."
                     status = "Nie ukończono synchronizacji: ${e.message ?: "sprawdź dostęp do danych"}. Zapisane dane zostały zachowane."
