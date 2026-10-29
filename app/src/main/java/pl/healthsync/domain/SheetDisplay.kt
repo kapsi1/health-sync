@@ -1,6 +1,8 @@
 package pl.healthsync.domain
 
 import java.util.Locale
+import java.math.BigDecimal
+import java.math.RoundingMode
 import kotlin.math.roundToLong
 
 fun durationAsText(hours: Double): String {
@@ -9,8 +11,14 @@ fun durationAsText(hours: Double): String {
     return String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
 }
 
-fun sheetValue(columnName: String, value: Double): Any =
-    if (columnName == "exercise_hours") durationAsText(value) else value
+val durationColumns = setOf("exercise_hours", "sleep_hours")
+
+/** Round only at the export boundary; local observations retain their source precision. */
+fun sheetValue(columnName: String, value: Double): Any {
+    require(value.isFinite())
+    return if (columnName in durationColumns) durationAsText(value)
+    else BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toDouble()
+}
 
 fun legacyDurationText(value: Any?): String? {
     val hours = (value as? Number)?.toDouble() ?: return null
@@ -18,4 +26,9 @@ fun legacyDurationText(value: Any?): String? {
     return durationAsText(hours)
 }
 
-val displayNumberPatterns = mapOf("total_kcal" to "0", "active_kcal" to "0", "distance_km" to "0.000")
+val displayNumberPatterns = listOf(
+    "steps", "total_kcal", "active_kcal", "distance_km", "floors", "elevation_m",
+    "heart_rate_avg_bpm", "heart_rate_min_bpm", "heart_rate_max_bpm", "resting_hr_bpm",
+    "hrv_rmssd_ms", "oxygen_saturation_percent", "respiratory_rate", "body_temperature_c",
+    "vo2_max", "weight_avg_kg", "body_fat_percent", "lean_body_mass_kg", "height_avg_m", "hydration_l"
+).associateWith { "0.##" }

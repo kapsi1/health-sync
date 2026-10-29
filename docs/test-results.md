@@ -8,7 +8,9 @@ Testy instrumentacyjne uruchomione przez ADB przeszły: **16 testów**, obejmuj�
 
 ## Testy jednostkowe
 
-Projekt obejmuje m.in. dzielenie historii na porcje, wznowienie po błędzie i następnego dnia, odczyt zmian i odzyskanie po wygaśnięciu tokenu, reguły snu, łączenie danych z arkuszem, zachowanie kolejki po zmianie obserwacji i ponowienie po niejednoznacznym zapisie. Liczniki wysyłki sprawdzają dodawanie i zapis istniejących wierszy, w tym ponowienie po timeout. Sortowanie ma testy jednostkowe: dodanie starszych dat, niepowodzenie sortowania i ponowienie bez duplikatów oraz pustą kolejkę. Test struktury żądania sortowania przeszedł na urządzeniu; sortowanie w prawdziwym arkuszu wymaga ręcznej weryfikacji.
+29.10.2026: `testDebugUnitTest assembleDebug --offline --no-daemon` zakończone sukcesem, **41 testów jednostkowych**. Eksport obejmuje zaokrąglanie liczb przed wysłaniem (kcal, dystans, średnia waga z długą częścią ułamkową, próg połowy, liczby ujemne i całkowite), odrzucenie NaN i format tekstowy obu czasów: ćwiczeń i snu. Pasek tabów ma własny wiersz bez górnego odstępu Material NavigationBar; wygląd i zapis do rzeczywistego arkusza wymagają potwierdzenia użytkownika.
+
+Projekt obejmuje m.in. dzielenie historii na porcje, wznowienie po błędzie i następnego dnia, odczyt zmian i odzyskanie po wygaśnięciu tokenu, reguły snu, łączenie danych z arkuszem, zachowanie kolejki po zmianie obserwacji i ponowienie po niejednoznacznym zapisie. Liczniki wysyłki sprawdzają dodawanie i zapis istniejących wierszy, w tym ponowienie po timeout. Sortowanie ma testy jednostkowe: dodanie starszych dat, niepowodzenie sortowania i ponowienie bez duplikatów oraz pustą kolejkę. Test struktury żądania sortowania przeszedł na urządzeniu; użytkownik potwierdził sortowanie w prawdziwym arkuszu.
 
 Polecenie: `./gradlew.bat testDebugUnitTest assembleDebug`. Testy instrumentacyjne wymagają przygotowanego SDK, podłączonego urządzenia i zależności Gradle lub uruchomienia zbudowanego APK testowego przez ADB.
 

@@ -146,7 +146,8 @@ class MainActivity : ComponentActivity() {
                 val labelStyle = MaterialTheme.typography.labelSmall
                 val availableWidth = with(LocalDensity.current) { (maxWidth / 4 - 16.dp).roundToPx() }
                 val syncLabel = if (measurer.measure("Synchronizuj", style = labelStyle).size.width <= availableWidth) "Synchronizuj" else "Sync"
-                NavigationBar(modifier = Modifier.selectableGroup()) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().selectableGroup()) {
                     listOf(syncLabel, "Dane", "Arkusz", "Dziennik").forEachIndexed { index, label ->
                         Box(
                             modifier = Modifier.weight(1f).height(56.dp)
@@ -159,6 +160,7 @@ class MainActivity : ComponentActivity() {
                                 style = labelStyle, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                }
                 }
             }
             }

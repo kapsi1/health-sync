@@ -11,6 +11,7 @@ import pl.healthsync.domain.SheetSnapshot
 import pl.healthsync.domain.planColumnVisibility
 import pl.healthsync.domain.planSheetMerge
 import pl.healthsync.domain.displayNumberPatterns
+import pl.healthsync.domain.durationColumns
 import pl.healthsync.domain.legacyDurationText
 import pl.healthsync.domain.sheetValue
 import java.net.HttpURLConnection
@@ -62,8 +63,9 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             requests.put(JSONObject().put("repeatCell", JSONObject().put("range", range).put("cell", cell).put("fields", "userEnteredFormat.numberFormat")))
         }
         call("POST", "$spreadsheet:batchUpdate", JSONObject().put("requests", requests))
-        val durationIndex = currentHeaders.indexOf("exercise_hours")
-        if (durationIndex >= 0) migrateDurationColumn(durationIndex + 1)
+        currentHeaders.forEachIndexed { index, header ->
+            if (header in durationColumns) migrateDurationColumn(index + 1)
+        }
     }
 
     private suspend fun migrateDurationColumn(columnNumber: Int) {

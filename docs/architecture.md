@@ -1,6 +1,6 @@
 # Architektura Health Sync
 
-Health Connect jest jedynym źródłem synchronizacji. Aplikacja odczytuje dostępne, wybrane statystyki i przelicza je na dni w strefie `Europe/Warsaw`; nie pobiera historii przechowywanej wyłącznie w Google Health/Fitbit. Import Takeout pozostaje wstrzymany.
+Health Connect jest obecnie jedynym zaimplementowanym źródłem synchronizacji. Aplikacja odczytuje dostępne, wybrane statystyki i przelicza je na dni w strefie `Europe/Warsaw`; nie pobiera historii przechowywanej wyłącznie w Google Health/Fitbit. Import Takeout i Google Health API są rozważane; wybór źródła i reguł konfliktów pozostaje otwarty.
 
 ## Przepływ danych
 
@@ -11,6 +11,8 @@ Health Connect jest jedynym źródłem synchronizacji. Aplikacja odczytuje dost�
 5. WorkManager okresowo przelicza ostatnie trzy dni oraz sprawdza listę zmian wagi i tkanki tłuszczowej. Starsze zmiany są przeliczane dla ich dat. Po wygaśnięciu tokenu aplikacja odtwarza poprzednio importowany zakres, porcjowo.
 
 Operacje na arkuszu są serializowane między synchronizacją ręczną, tłem i zmianą pliku. Kolejność kolumn jest ustalana na podstawie nagłówków. Kolumny wyłączonych statystyk są ukrywane, a po włączeniu dodawane albo odkrywane; pozostałe zakładki i kolumny pozostają pod kontrolą użytkownika.
+
+Eksport zaokrągla wartości liczbowe do maksymalnie dwóch miejsc dziesiętnych przed wysłaniem przez API; Room zachowuje pełną precyzję. Format kolumn jest tylko uzupełnieniem prezentacji. `exercise_hours` i `sleep_hours` są zapisywane jako tekst `hh:mm:ss`, z godzinami bez zawijania po 24. Dawne liczbowe czasy są konwertowane przy uzgadnianiu kolumn, bez zmiany tekstów i formuł. Obecnie czas snu oznacza pełną długość sesji przypisaną do dnia jej końca, a nie sumę samych faz snu; ujednolicenie definicji ze źródłami zewnętrznymi jest w planie.
 
 ## Dostęp i diagnostyka
 
