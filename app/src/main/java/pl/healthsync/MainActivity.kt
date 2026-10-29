@@ -225,6 +225,7 @@ class MainActivity : ComponentActivity() {
                 Text("Importuj od", style = MaterialTheme.typography.labelLarge)
                 val chosenDate = LocalDate.parse(historyStart)
                 val displayedDate = chosenDate.format(DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.forLanguageTag("pl-PL")))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = {
                     val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
                     val dialog = DatePickerDialog(this@MainActivity, { _, year, month, day ->
@@ -236,7 +237,13 @@ class MainActivity : ComponentActivity() {
                     dialog.datePicker.minDate = LocalDate.of(1900, 1, 1).atStartOfDay(deviceZone).toInstant().toEpochMilli()
                     dialog.datePicker.maxDate = today.atStartOfDay(deviceZone).toInstant().toEpochMilli()
                     dialog.show()
-                }, enabled = historyJob == null && !googleBusy, modifier = Modifier.fillMaxWidth()) { Text(displayedDate) }
+                }, enabled = historyJob == null && !googleBusy, modifier = Modifier.weight(1f)) { Text(displayedDate, maxLines = 1, softWrap = false) }
+                OutlinedButton(onClick = {
+                    historyStart = LocalDate.now(ZoneId.of("Europe/Warsaw")).toString()
+                    dateLoaded = true
+                    scope.launch { backgroundSettings.saveStartDate(historyStart) }
+                }, enabled = historyJob == null && !googleBusy) { Text("Dzisiaj", maxLines = 1, softWrap = false) }
+                }
                 fun startImport() {
                     val start = try { LocalDate.parse(historyStart) } catch (_: Exception) { historyStatus = "Wpisz poprawną datę w formacie RRRR-MM-DD."; return }
                     val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
@@ -347,7 +354,7 @@ class MainActivity : ComponentActivity() {
                         val lastAuto = runs.filter { it.kind == "Automatyczna" && it.complete && it.events.isNotEmpty() }
                             .maxByOrNull { it.events.last().at }
                         val lastTime = lastAuto?.events?.lastOrNull()?.at?.let { runCatching { Instant.parse(it) }.getOrNull() }
-                        val label = if (lastAuto?.error == true) "Ostatnia próba" else "Ostatnia"
+                        val label = if (lastAuto?.lastError != false) "Ostatnia próba" else "Ostatnia"
                         Text(if (lastTime == null) "Brak zapisanej automatycznej synchronizacji" else "$label: ${relativeTime(lastTime, clockNow)}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -367,12 +374,12 @@ class MainActivity : ComponentActivity() {
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { expanded = !expanded }) {
-                                    Text("${if (expanded) "▴" else "▾"}  ${run.kind} · ${if (!run.complete) "w toku" else if (run.error) "z błędem lub ponowieniem" else "zakończona"}")
+                                    Text("${if (expanded) "▴" else "▾"}  ${run.kind} · ${if (!run.complete) "w toku" else if (run.lastError == true) "nieudana" else if (run.lastError == null && run.error) "z błędem lub ponowieniem" else if (run.error) "zakończona po ponowieniu" else "zakończona"}")
                                 }
                                 if (!expanded) run.events.lastOrNull()?.let { Text("${formatJournalTime(it.at)} · ${it.message}", style = MaterialTheme.typography.bodySmall) }
                                 if (expanded) {
                                     run.events.forEach { event -> Text("${formatJournalTime(event.at)} — ${event.message}", style = MaterialTheme.typography.bodySmall) }
-                                    if (run.error) {
+                                    if (run.complete && run.error && run.lastError != false) {
                                         when (recoveryDestination(run.events.lastOrNull()?.message.orEmpty())) {
                                             RecoveryDestination.SHEET -> TextButton(onClick = { tab = 2 }) { Text("Sprawdź arkusz i dostęp Google") }
                                             RecoveryDestination.DATA -> TextButton(onClick = { tab = 1 }) { Text("Sprawdź wybór danych i zgody") }

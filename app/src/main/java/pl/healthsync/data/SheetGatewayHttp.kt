@@ -22,6 +22,7 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
     private var headerCount = 0
     private var headers = emptyList<String>()
     private var hasUnlabeledData = false
+    private var dailySheetId: Int? = null
     private val spreadsheet = "https://sheets.googleapis.com/v4/spreadsheets/${encode(spreadsheetId)}"
     private val base = "$spreadsheet/values"
 
@@ -45,6 +46,7 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
         val daily = (0 until sheets.length()).map { sheets.getJSONObject(it).getJSONObject("properties") }
             .single { it.getString("title") == "daily" }
         val sheetId = daily.getInt("sheetId")
+        dailySheetId = sheetId
         val requests = JSONArray()
         visibility.forEach { item ->
             val range = JSONObject().put("sheetId", sheetId).put("dimension", "COLUMNS")
@@ -130,6 +132,16 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
         call("POST", "$base/${encode("'daily'!A1")}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", JSONObject().put("majorDimension", "ROWS").put("values", data))
     }
 
+    override suspend fun sortRowsByDate() {
+        val sheetId = dailySheetId ?: run {
+            val meta = call("GET", "$spreadsheet?fields=${encode("sheets.properties(sheetId,title)")}")
+            val sheets = meta.getJSONArray("sheets")
+            (0 until sheets.length()).map { sheets.getJSONObject(it).getJSONObject("properties") }
+                .single { it.getString("title") == "daily" }.getInt("sheetId").also { dailySheetId = it }
+        }
+        call("POST", "$spreadsheet:batchUpdate", dateSortRequest(sheetId))
+    }
+
     private suspend fun call(method: String, endpoint: String, body: JSONObject? = null): JSONObject = withContext(Dispatchers.IO) {
         val conn = URL(endpoint).openConnection() as HttpURLConnection
         try {
@@ -148,6 +160,14 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
             if (text.isBlank()) JSONObject() else JSONObject(text)
         } finally { conn.disconnect() }
     }
+}
+
+/** Sort all columns together, excluding the header; open ends include user-added columns. */
+internal fun dateSortRequest(sheetId: Int): JSONObject {
+    val range = JSONObject().put("sheetId", sheetId).put("startRowIndex", 1).put("startColumnIndex", 0)
+    val sortSpec = JSONObject().put("dimensionIndex", 0).put("sortOrder", "ASCENDING")
+    val sort = JSONObject().put("range", range).put("sortSpecs", JSONArray().put(sortSpec))
+    return JSONObject().put("requests", JSONArray().put(JSONObject().put("sortRange", sort)))
 }
 
 private fun encode(value: String) = URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")

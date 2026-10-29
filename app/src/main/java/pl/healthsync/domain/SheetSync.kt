@@ -19,6 +19,8 @@ interface SheetGateway {
     suspend fun addColumns(headers: List<String>)
     suspend fun updateCells(updates: List<SheetCellUpdate>)
     suspend fun appendRows(rows: List<SheetNewRow>)
+    /** Sort complete rows in daily, leaving the header and other tabs untouched. */
+    suspend fun sortRowsByDate()
 }
 
 interface PendingQueue {
@@ -32,14 +34,19 @@ class SheetSync(private val gateway: SheetGateway, private val queue: PendingQue
     suspend fun uploadBatch(limit: Int = 100): SheetBatchResult = lock.withLock {
         require(limit in 1..500)
         val batch = queue.snapshot(limit)
-        if (batch.rows.isEmpty()) return@withLock SheetBatchResult(0, 0)
         val snapshot = gateway.snapshot()
+        if (batch.rows.isEmpty()) {
+            planSheetMerge(snapshot.headers, snapshot.dateCells, emptyList(), emptySet())
+            if (snapshot.dateCells.size > 1) gateway.sortRowsByDate()
+            return@withLock SheetBatchResult(0, 0)
+        }
         val rows = batch.rows.map { SheetRow(it.date, it.cells) }
         val columns = rows.flatMap { it.cells.keys }.toSet()
         val plan = planSheetMerge(snapshot.headers, snapshot.dateCells, rows, columns)
         if (plan.newColumns.isNotEmpty()) gateway.addColumns(plan.newColumns)
         if (plan.updates.isNotEmpty()) gateway.updateCells(plan.updates)
         if (plan.newRows.isNotEmpty()) gateway.appendRows(plan.newRows)
+        if (snapshot.dateCells.size + plan.newRows.size > 1) gateway.sortRowsByDate()
         queue.acknowledge(batch)
         SheetBatchResult(plan.newRows.size, plan.updates.map { it.rowNumber }.distinct().size)
     }

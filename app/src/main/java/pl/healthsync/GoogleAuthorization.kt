@@ -28,6 +28,8 @@ import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -163,8 +165,11 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Bool
                     status = "Synchronizacja zatrzymana. Sprawdź sieć i unikalność dat w arkuszu; kolejka została zachowana."
                 } finally {
                     busy = false
-                    BackgroundSettings(activity.applicationContext).log("Synchronizacja ręczna: $status")
-                    manualRunId?.let { SyncJournal(activity.applicationContext).event(it, "Ręczna", failure ?: status, error = failure != null, complete = true) }
+                    withContext(NonCancellable) {
+                        val finalStatus = failure ?: status
+                        BackgroundSettings(activity.applicationContext).log("Synchronizacja ręczna: $finalStatus")
+                        manualRunId?.let { SyncJournal(activity.applicationContext).event(it, "Ręczna", finalStatus, error = failure != null, complete = true) }
+                    }
                 }
             }
             return

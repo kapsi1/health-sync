@@ -1,6 +1,6 @@
 # Health Sync — aktualny plan
 
-**Aktualizacja:** 28.10.2026
+**Aktualizacja:** 29.10.2026
 
 **Cel:** prywatna aplikacja Android, bez własnego serwera, synchronizująca wybrane dzienne statystyki z Health Connect do Google Sheets. Interfejs jest po polsku. Poprawność danych i możliwość wznowienia mają pierwszeństwo przed wygodą i wydajnością.
 
@@ -25,9 +25,9 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [x] Dane: 22 statystyki dzienne, grupy, liczniki i przełączniki także dla wyboru częściowego; przycisk brakujących zgód i link do ustawień Health Connect.
 - [x] Data początkowa z natywnym wybieraczem, zapamiętywanie daty, wspólny przycisk importu i wysyłki, pasek rzeczywistego postępu porcji, przerwanie importu.
 - [x] Kontekstowa prośba o starszą historię i odczyt w tle; konfiguracja automatycznej synchronizacji i czas ostatniego uruchomienia.
-- [x] Dziennik ręczny i automatyczny, grupowanie etapów i ponowień, filtr błędów oraz kopiowanie nowych szczegółów bez wartości pomiarów lub tokenów; poprzednia historia zachowana.
+- [x] Dziennik ręczny i automatyczny, grupowanie etapów i ponowień, filtr błędów oraz kopiowanie nowych szczegółów bez wartości pomiarów lub tokenów; poprzednia historia zachowana. Nowe wpisy odróżniają wynik ostatniej próby od wcześniejszych błędów; starsze wpisy z niejednoznacznym wynikiem nie są zgadywane.
 - [~] Dziennik wskazuje odpowiednią zakładkę przy typowych błędach i zachowuje kody HTTP. Pokazuje osobno liczbę dodanych wierszy i zapisów do istniejących (bez twierdzenia, że wartości się zmieniły). Szczegółowe działania naprawcze pozostają do uzupełnienia; użytkownik potwierdził działanie liczników w rzeczywistym arkuszu.
-- [~] Pasek postępu jest dostępny we wszystkich zakładkach; przerwany import jest oznaczony i można go wznowić. Wymaga ręcznej weryfikacji nowego interfejsu na urządzeniu.
+- [x] Pasek postępu jest dostępny we wszystkich zakładkach; przerwany import jest oznaczony i można go wznowić. Użytkownik potwierdził działanie paska i importu na urządzeniu.
 
 ### Health Connect i import
 
@@ -45,15 +45,16 @@ Oznaczenia: **[x]** zaimplementowane i potwierdzone w podanym zakresie; **[~]** 
 - [x] Autoryzacja Google, tworzenie arkusza, otwieranie, sprawdzanie dostępu oraz ponowne podłączanie przez ID lub URL; użytkownik potwierdził otwieranie i zmianę arkusza.
 - [x] Przy zmianie arkusza wybór całej lokalnej historii lub samej kolejki; synchronizacja dostępu do arkusza między operacją ręczną i tłem.
 - [x] Aktualizacja po dacie i wznowienie kolejki, bez zmiany obcych zakładek i kolumn. Istnieją testy logiki ponowienia oraz timeoutu po zapisie.
+- [~] Sortowanie wierszy `daily` rosnąco według daty, razem ze wszystkimi kolumnami, także gdy kolejka jest pusta. Testy jednostkowe obejmują starsze daty i ponowienie po błędzie sortowania; wymagany jest test na prawdziwym arkuszu.
 - [x] Kolumny wyłączonych metryk są ukrywane, a włączonych dodawane lub odkrywane; uzupełnianie historii potwierdzone przez użytkownika.
 - [x] Formatowanie: kcal bez części ułamkowej, dystans do 3 miejsc po przecinku, czas ćwiczeń jako czas.
-- [~] Zaimplementowano Google Picker dla Androida do wyboru pliku i nadania dostępu `drive.file`; w projekcie Cloud trzeba włączyć Google Picker API. Użytkownik potwierdził działanie na urządzeniu; pozostaje sprawdzić anulowanie, odmowę i nieprawidłową strukturę arkusza. Kolejka zostaje zachowana przy błędach.
+- [~] Zaimplementowano Google Picker dla Androida do wyboru pliku i nadania dostępu `drive.file`; w projekcie Cloud trzeba włączyć Google Picker API. Użytkownik potwierdził działanie na urządzeniu; pozostaje sprawdzić anulowanie, odmowę i nieprawidłową strukturę arkusza. Nazwa arkusza jest pobierana po otwarciu zakładki, a ID można edytować w osobnym oknie. Kolejka zostaje zachowana przy błędach.
 - [~] Przetestować przywrócenie po wyczyszczeniu danych aplikacji z tym samym arkuszem oraz odmowę i ponowne przyznanie dostępu.
 
 ### Testy, wydanie i dokumentacja
 
 - [x] Build debug i testy jednostkowe; użytkownik potwierdził ręczną synchronizację, cykliczne działanie w tle, podstawowe wybieranie danych, zmiany arkusza i ostatnią wersję interfejsu.
-- [x] Testy instrumentacyjne Room i migracji 1→4, 2→4 i 3→4 przeszły na podłączonym telefonie (13 testów instrumentacyjnych w całym zestawie).
+- [x] Testy instrumentacyjne Room i migracji 1→4, 2→4 i 3→4 przeszły na podłączonym telefonie (16 testów instrumentacyjnych w całym zestawie, w tym dziennika i żądania sortowania).
 - [~] Zweryfikować wznowienie na rzeczywistych danych po przerwaniu i restarcie aplikacji.
 - [ ] Sprawdzić brak sieci, odwołanie zgód, retry po timeout, restart telefonu, duży zakres historii oraz skutki współbieżnych operacji na urządzeniu.
 - [ ] Zweryfikować wybrane agregaty ze źródłem Health Connect, w tym strefę czasu, zmianę czasu, sesje snu i różne źródła danych.

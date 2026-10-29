@@ -19,9 +19,16 @@ class SheetSyncTest {
         var updates = 0
         var appendCalls = 0
         var timeoutAfterAppend = false
+        var failSort = false
+        var sortCalls = 0
         override suspend fun snapshot() = SheetSnapshot(headers, dates.toList())
         override suspend fun addColumns(headers: List<String>) { this.headers += headers }
         override suspend fun updateCells(updates: List<SheetCellUpdate>) { this.updates += updates.size }
+        override suspend fun sortRowsByDate() {
+            sortCalls++
+            if (failSort) { failSort = false; error("sort failed") }
+            dates.sortWith(compareBy(nullsLast()) { it })
+        }
         override suspend fun appendRows(rows: List<SheetNewRow>) {
             appendCalls++
             dates.addAll(rows.map { it.date.toString() })
@@ -55,6 +62,7 @@ class SheetSyncTest {
             override suspend fun addColumns(headers: List<String>) = Unit
             override suspend fun updateCells(updates: List<SheetCellUpdate>) = Unit
             override suspend fun appendRows(rows: List<SheetNewRow>) { queue.batch = PendingBatch(listOf(second)) }
+            override suspend fun sortRowsByDate() = Unit
         }
         SheetSync(gateway, queue).uploadBatch()
         assertEquals(PendingBatch(listOf(second)), queue.batch)
@@ -72,5 +80,33 @@ class SheetSyncTest {
         assertEquals(2, gateway.updates)
         assertEquals(1, queue.acknowledgments)
         assertEquals(SheetBatchResult(0, 0), sync.uploadBatch())
+    }
+    @Test fun `older appended dates are sorted before queue acknowledgement`() = runBlocking {
+        val queue = FakeQueue(PendingBatch(listOf(PendingSheetDay(date.minusMonths(2), mapOf("steps" to 5.0), "one"))))
+        val gateway = FakeGateway().apply { dates.add(date.toString()) }
+        SheetSync(gateway, queue).uploadBatch()
+        assertEquals(listOf(date.minusMonths(2).toString(), date.toString()), gateway.dates)
+        assertEquals(1, gateway.sortCalls)
+        assertEquals(1, queue.acknowledgments)
+    }
+
+    @Test fun `failed sorting retains queue and retry avoids duplicate dates`() = runBlocking {
+        val queue = FakeQueue(PendingBatch(listOf(PendingSheetDay(date.minusMonths(2), mapOf("steps" to 5.0), "one"))))
+        val gateway = FakeGateway().apply { dates.add(date.toString()); failSort = true }
+        val sync = SheetSync(gateway, queue)
+        try { sync.uploadBatch(); fail("expected sort failure") } catch (_: IllegalStateException) { }
+        assertEquals(0, queue.acknowledgments)
+        sync.uploadBatch()
+        assertEquals(1, gateway.appendCalls)
+        assertEquals(listOf(date.minusMonths(2).toString(), date.toString()), gateway.dates)
+        assertEquals(1, queue.acknowledgments)
+    }
+
+    @Test fun `empty queue still sorts existing rows`() = runBlocking {
+        val queue = FakeQueue(PendingBatch(emptyList()))
+        val gateway = FakeGateway().apply { dates.addAll(listOf(date.toString(), date.minusMonths(1).toString())) }
+        assertEquals(SheetBatchResult(0, 0), SheetSync(gateway, queue).uploadBatch())
+        assertEquals(listOf(date.minusMonths(1).toString(), date.toString()), gateway.dates)
+        assertEquals(0, queue.acknowledgments)
     }
 }

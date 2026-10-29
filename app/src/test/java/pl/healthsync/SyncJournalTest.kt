@@ -11,6 +11,9 @@ class SyncJournalTest {
         val finished = appendEvent(retry, "run", "Automatyczna", SyncEvent("4", "Gotowe"), false, true)
         assertTrue(finished.error)
         assertTrue(finished.complete)
+        assertEquals(false, finished.lastError)
+        assertEquals(true, failed.lastError)
+        assertNull(retry.lastError)
         assertEquals(listOf("Start", "Błąd", "Ponowienie", "Gotowe"), finished.events.map { it.message })
     }
 
