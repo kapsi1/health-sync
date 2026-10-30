@@ -7,6 +7,12 @@ import java.io.StringReader
 import java.time.Instant
 
 class TakeoutRecordsTest {
+    @Test fun `daily resting heart rate keeps original timestamp and units`() {
+        val csv = "timestamp,beats per minute,data source\n2026-06-12T00:00:00Z,61.678,Google Health App\n"
+        val row = readTakeoutMeasurements(StringReader(csv), TakeoutKind.RESTING_HEART_RATE).single()
+        assertEquals(61.678, row.value, 0.0)
+        assertEquals(java.time.Instant.parse("2026-06-12T00:00:00Z"), row.time)
+    }
     @Test fun `weight converts grams and keeps source for safe import filtering`() {
         val csv = "timestamp,weight grams,data source\n2026-10-14T06:00:00Z,70500,Google Health App\n2026-10-15T06:00:00Z,71000,Fit Health Connect\n"
         val rows = readTakeoutMeasurements(StringReader(csv), TakeoutKind.WEIGHT)

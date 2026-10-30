@@ -13,7 +13,12 @@ private val Context.settings by preferencesDataStore(name = "settings")
 class MetricSelection(private val context: Context) {
     private val key = stringSetPreferencesKey("selected_metrics")
     private val pendingKey = stringSetPreferencesKey("history_backfills")
-    val selected = context.settings.data.map { it[key] ?: emptySet() }
+    private fun current(ids: Set<String>): Set<String> = ids.map { id -> when (id) {
+        "respiratory_rate" -> "respiratory_rate_sleep"
+        "body_temperature" -> "skin_temperature_delta"
+        else -> id
+    } }.filter { id -> MetricRegistry.all.any { it.id == id } }.toSet()
+    val selected = context.settings.data.map { current(it[key] ?: emptySet()) }
     val pending = context.settings.data.map { preferences ->
         (preferences[pendingKey] ?: emptySet()).mapNotNull { token ->
             token.substringBefore('|').takeIf { '|' in token }?.let { it to token }
@@ -25,6 +30,11 @@ class MetricSelection(private val context: Context) {
         preferences[pendingKey] = updateBackfillRequests(previous, selected, preferences[pendingKey] ?: emptySet()) { UUID.randomUUID().toString() }
     }
     suspend fun set(selected: Set<String>) { context.settings.edit { update(it, selected) } }
+    suspend fun migrate() { context.settings.edit { preferences ->
+        val previous = preferences[key] ?: emptySet()
+        val updated = current(previous)
+        if (previous != updated) update(preferences, updated)
+    } }
     suspend fun toggle(id: String, enabled: Boolean) {
         context.settings.edit { preferences ->
             val current = preferences[key] ?: emptySet()

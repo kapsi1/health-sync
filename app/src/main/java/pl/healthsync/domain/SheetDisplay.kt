@@ -33,5 +33,5 @@ val numericColumns = setOf(
     "hrv_rmssd_ms", "oxygen_saturation_percent", "respiratory_rate", "body_temperature_c",
     "vo2_max", "weight_avg_kg", "body_fat_percent", "lean_body_mass_kg", "height_avg_m", "hydration_l",
     "hrv_rmssd_avg_ms", "oxygen_saturation_avg_percent", "respiratory_rate_avg", "body_temperature_avg_c",
-    "vo2_max_avg", "body_fat_avg_percent", "lean_body_mass_avg_kg"
+    "vo2_max_avg", "body_fat_avg_percent", "lean_body_mass_avg_kg", "skin_temperature_delta_c", "respiratory_sleep_avg"
 )

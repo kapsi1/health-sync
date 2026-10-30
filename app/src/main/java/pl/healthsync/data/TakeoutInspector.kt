@@ -8,6 +8,7 @@ import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import pl.healthsync.domain.*
@@ -15,7 +16,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.reflect.KClass
 
-internal enum class TakeoutType(val label: String) { SLEEP("Sen"), WEIGHT("Waga"), FAT("Tkanka tłuszczowa"), HEIGHT("Wzrost") }
+internal enum class TakeoutType(val label: String) { SLEEP("Sen"), WEIGHT("Waga"), FAT("Tkanka tłuszczowa"), HEIGHT("Wzrost"), RESTING_HEART_RATE("Tętno spoczynkowe") }
 internal data class SleepPreviewEntry(val session: TakeoutSleep, val connect: SleepComparison)
 internal sealed interface TakeoutSelection {
     data class Measurement(val row: TakeoutMeasurement) : TakeoutSelection
@@ -28,6 +29,7 @@ internal fun takeoutReadPermissions(types: Set<TakeoutType>): Set<String> = buil
     if (TakeoutType.WEIGHT in types) add(HealthPermission.getReadPermission(WeightRecord::class))
     if (TakeoutType.FAT in types) add(HealthPermission.getReadPermission(BodyFatRecord::class))
     if (TakeoutType.HEIGHT in types) add(HealthPermission.getReadPermission(HeightRecord::class))
+    if (TakeoutType.RESTING_HEART_RATE in types) add(HealthPermission.getReadPermission(RestingHeartRateRecord::class))
     // Sleep sessions may start before the requested period, so the comparison needs all history.
     add(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)
 }
@@ -43,6 +45,7 @@ internal class TakeoutInspector(private val client: HealthConnectClient) {
             TakeoutType.WEIGHT -> "weight" in archive.foundTypes
             TakeoutType.FAT -> "fat" in archive.foundTypes
             TakeoutType.HEIGHT -> "height" in archive.foundTypes
+            TakeoutType.RESTING_HEART_RATE -> "resting_heart_rate" in archive.foundTypes
         } }
         require(missingFiles.isEmpty()) { "Brak plików w archiwum dla: ${missingFiles.joinToString { it.label }}." }
         check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) {
@@ -75,6 +78,13 @@ internal class TakeoutInspector(private val client: HealthConnectClient) {
             val existing = if (source.isEmpty()) emptyList() else readAll(HeightRecord::class, TimeRangeFilter.between(from, until)).map { ExistingMeasurement(TakeoutKind.HEIGHT, it.time, it.height.inMeters) }
             val compared = compareMeasurements(source, existing)
             counts[TakeoutType.HEIGHT] = compared.map { it.second }.groupingBy { it }.eachCount()
+            candidates.addAll(compared.filter { it.second == ImportDecision.INSERT }.map { TakeoutSelection.Measurement(it.first) })
+        }
+        if (TakeoutType.RESTING_HEART_RATE in types) {
+            val source = archive.restingHeartRates.filter { it.time >= from && it.time < until }
+            val existing = if (source.isEmpty()) emptyList() else readAll(RestingHeartRateRecord::class, TimeRangeFilter.between(from, until)).map { ExistingMeasurement(TakeoutKind.RESTING_HEART_RATE, it.time, it.beatsPerMinute.toDouble()) }
+            val compared = compareDailyRestingHeartRates(source, existing, zone)
+            counts[TakeoutType.RESTING_HEART_RATE] = compared.map { it.second }.groupingBy { it }.eachCount()
             candidates.addAll(compared.filter { it.second == ImportDecision.INSERT }.map { TakeoutSelection.Measurement(it.first) })
         }
         if (TakeoutType.SLEEP in types) {

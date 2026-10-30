@@ -12,27 +12,23 @@ object MetricRegistry {
         Metric("total_calories", "Spalone kalorie", "kcal", "Aktywność", "total_kcal", HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class)),
         Metric("active_calories", "Aktywne kalorie", "kcal", "Aktywność", "active_kcal", HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class)),
         Metric("distance", "Dystans km", "km", "Aktywność", "distance_km", HealthPermission.getReadPermission(DistanceRecord::class)),
-        Metric("floors", "Piętra", "piętra", "Aktywność", "floors", HealthPermission.getReadPermission(FloorsClimbedRecord::class)),
-        Metric("elevation", "Przewyższenie", "m", "Aktywność", "elevation_m", HealthPermission.getReadPermission(ElevationGainedRecord::class)),
         Metric("exercise_duration", "Czas ćwiczeń", "godz.", "Aktywność", "exercise_hours", HealthPermission.getReadPermission(ExerciseSessionRecord::class)),
-        Metric("heart_rate_avg", "Tętno", "ud./min", "Serce", "heart_rate_avg_bpm", HealthPermission.getReadPermission(HeartRateRecord::class)),
-        Metric("heart_rate_min", "Minimalne tętno", "ud./min", "Serce", "heart_rate_min_bpm", HealthPermission.getReadPermission(HeartRateRecord::class)),
-        Metric("heart_rate_max", "Maksymalne tętno", "ud./min", "Serce", "heart_rate_max_bpm", HealthPermission.getReadPermission(HeartRateRecord::class)),
         Metric("resting_heart_rate", "Tętno spoczynkowe", "ud./min", "Serce", "resting_hr_bpm", HealthPermission.getReadPermission(RestingHeartRateRecord::class)),
         Metric("hrv_rmssd", "HRV RMSSD", "ms", "Serce", "hrv_rmssd_avg_ms", HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)),
         Metric("oxygen_saturation", "Nasycenie krwi tlenem", "%", "Parametry życiowe", "oxygen_saturation_avg_percent", HealthPermission.getReadPermission(OxygenSaturationRecord::class)),
-        Metric("respiratory_rate", "Oddechy/min", "oddechów/min", "Parametry życiowe", "respiratory_rate_avg", HealthPermission.getReadPermission(RespiratoryRateRecord::class)),
-        Metric("body_temperature", "Temperatura ciała", "°C", "Parametry życiowe", "body_temperature_avg_c", HealthPermission.getReadPermission(BodyTemperatureRecord::class)),
-        Metric("vo2_max", "VO₂ max", "ml/kg/min", "Parametry życiowe", "vo2_max_avg", HealthPermission.getReadPermission(Vo2MaxRecord::class)),
+        Metric("respiratory_rate_sleep", "Oddechy/min podczas snu", "oddechów/min", "Parametry życiowe", "respiratory_sleep_avg", HealthPermission.getReadPermission(RespiratoryRateRecord::class)),
+        Metric("skin_temperature_delta", "Wahania temperatury skóry", "°C", "Parametry życiowe", "skin_temperature_delta_c", HealthPermission.getReadPermission(SkinTemperatureRecord::class)),
         Metric("sleep_duration", "Czas snu", "godz.", "Sen", "sleep_hours", HealthPermission.getReadPermission(SleepSessionRecord::class)),
         Metric("sleep_awake", "Czas wybudzeń podczas snu", "godz.", "Sen", "sleep_awake_hours", HealthPermission.getReadPermission(SleepSessionRecord::class)),
         Metric("weight_avg", "Waga kg", "kg", "Ciało", "weight_avg_kg", HealthPermission.getReadPermission(WeightRecord::class)),
         Metric("body_fat", "% tłuszczu", "%", "Ciało", "body_fat_avg_percent", HealthPermission.getReadPermission(BodyFatRecord::class)),
-        Metric("lean_body_mass", "Beztłuszczowa masa ciała", "kg", "Ciało", "lean_body_mass_avg_kg", HealthPermission.getReadPermission(LeanBodyMassRecord::class)),
-        Metric("height_avg", "Wzrost", "m", "Ciało", "height_avg_m", HealthPermission.getReadPermission(HeightRecord::class)),
-        Metric("hydration", "Nawodnienie", "l", "Odżywianie", "hydration_l", HealthPermission.getReadPermission(HydrationRecord::class)),
     )
     val archivedColumns = mapOf(
+        "floors" to "Piętra", "elevation_m" to "Przewyższenie",
+        "heart_rate_avg_bpm" to "Tętno", "heart_rate_min_bpm" to "Minimalne tętno", "heart_rate_max_bpm" to "Maksymalne tętno",
+        "respiratory_rate_avg" to "Oddechy/min", "body_temperature_avg_c" to "Temperatura ciała",
+        "vo2_max_avg" to "VO₂ max", "lean_body_mass_avg_kg" to "Beztłuszczowa masa ciała",
+        "height_avg_m" to "Wzrost", "hydration_l" to "Nawodnienie",
         "hrv_rmssd_ms" to "HRV RMSSD — ostatni pomiar",
         "oxygen_saturation_percent" to "Nasycenie krwi tlenem — ostatni pomiar",
         "respiratory_rate" to "Oddechy — ostatni pomiar",
@@ -51,4 +47,9 @@ object MetricRegistry {
     )
     val sheetHeaders by lazy { SheetHeaders(all.associate { it.column to it.label } + archivedColumns, previousLabels) }
     val managedColumns get() = all.map { it.column }.toSet() + archivedColumns.keys
+}
+
+fun requiredMetricPermissions(metric: Metric): Set<String> = buildSet {
+    add(metric.permission)
+    if (metric.id == "respiratory_rate_sleep") add(HealthPermission.getReadPermission(SleepSessionRecord::class))
 }

@@ -4,6 +4,11 @@ import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.RestingHeartRateRecord
+import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import pl.healthsync.domain.*
 import java.time.LocalDate
 import java.time.ZoneId
@@ -23,6 +28,12 @@ internal fun reconstructTakeoutPlan(archive: TakeoutArchive, start: LocalDate, e
     }
     if (TakeoutType.HEIGHT in types) archive.heights.filter { it.time >= from && it.time < until && it.source == "Google Health App" }.forEach {
         output.add(mapTakeoutSelection(TakeoutSelection.Measurement(it), accountKey))
+    }
+    if (TakeoutType.RESTING_HEART_RATE in types) {
+        val rows = archive.restingHeartRates.filter { it.time >= from && it.time < until }
+        compareDailyRestingHeartRates(rows, emptyList(), zone).filter { it.second == ImportDecision.INSERT }.forEach {
+            output.add(mapTakeoutSelection(TakeoutSelection.Measurement(it.first), accountKey))
+        }
     }
     if (TakeoutType.SLEEP in types && archive.thirdPartySleepIds != null) {
         val sources = archive.thirdPartySleepIds
@@ -65,7 +76,13 @@ internal fun affectedTakeoutDates(plan: List<TakeoutPlannedRecord>): Map<String,
             }
             is WeightRecord -> result.getOrPut("weight_avg") { mutableSetOf() }.add(record.time.atZone(zone).toLocalDate())
             is BodyFatRecord -> result.getOrPut("body_fat") { mutableSetOf() }.add(record.time.atZone(zone).toLocalDate())
-            is HeightRecord -> result.getOrPut("height_avg") { mutableSetOf() }.add(record.time.atZone(zone).toLocalDate())
+            // Older sessions may still contain height; their records remain undoable, but height is no longer exported.
+            is HeightRecord -> Unit
+            is RestingHeartRateRecord -> result.getOrPut("resting_heart_rate") { mutableSetOf() }.add(record.time.atZone(zone).toLocalDate())
+            is StepsRecord -> result.getOrPut("steps") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
+            is DistanceRecord -> result.getOrPut("distance") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
+            is TotalCaloriesBurnedRecord -> result.getOrPut("total_calories") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
+            is ActiveCaloriesBurnedRecord -> result.getOrPut("active_calories") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
         }
     }
     return result

@@ -12,6 +12,7 @@ internal data class TakeoutArchive(
     val foundTypes: Set<String>,
     val thirdPartySleepIds: Set<String>? = null,
     val heights: List<TakeoutMeasurement> = emptyList(),
+    val restingHeartRates: List<TakeoutMeasurement> = emptyList(),
 )
 
 internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
@@ -31,6 +32,7 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
                 path.contains("/Health Fitness Data_GoogleData/") && name == "User3rdPartySleepAttributes.csv" -> "sleep_origins"
                 path.contains("/Physical Activity_GoogleData/Weight/") && name == "weight.csv" -> "weight"
                 path.contains("/Physical Activity_GoogleData/Height/") && name == "height.csv" -> "height"
+                path.contains("/Physical Activity_GoogleData/Daily Resting Heart Rate/") && name == "daily_resting_heart_rate.csv" -> "resting_heart_rate"
                 path.contains("/Physical Activity_GoogleData/Body Fat/") && name.matches(Regex("body_fat_[0-9-]+\\.csv")) -> "fat"
                 else -> null
             }
@@ -52,7 +54,7 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
             zip.closeEntry()
         }
     }
-    require(files["sleep"].orEmpty().size <= 1 && files["stages"].orEmpty().size <= 1 && files["weight"].orEmpty().size <= 1 && files["height"].orEmpty().size <= 1 && files["sleep_origins"].orEmpty().size <= 1) {
+    require(files["sleep"].orEmpty().size <= 1 && files["stages"].orEmpty().size <= 1 && files["weight"].orEmpty().size <= 1 && files["height"].orEmpty().size <= 1 && files["sleep_origins"].orEmpty().size <= 1 && files["resting_heart_rate"].orEmpty().size <= 1) {
         "W archiwum znaleziono wiele plików tego samego typu; nie można ich jednoznacznie połączyć"
     }
     require(files.containsKey("sleep") == files.containsKey("stages")) { "Do analizy snu potrzebne są pliki sesji i faz" }
@@ -60,6 +62,7 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
     val weight = files["weight"].orEmpty().flatMap { it.reader().use { reader -> readTakeoutMeasurements(reader, TakeoutKind.WEIGHT) } }
     val fat = files["fat"].orEmpty().flatMap { it.reader().use { reader -> readTakeoutMeasurements(reader, TakeoutKind.BODY_FAT) } }
     val height = files["height"].orEmpty().flatMap { it.reader().use { reader -> readTakeoutMeasurements(reader, TakeoutKind.HEIGHT) } }
+    val resting = files["resting_heart_rate"].orEmpty().flatMap { it.reader().use { reader -> readTakeoutMeasurements(reader, TakeoutKind.RESTING_HEART_RATE) } }
     val sleeps = if (files.containsKey("sleep")) files.getValue("sleep").single().reader().use { a ->
         files.getValue("stages").single().reader().use { b -> readTakeoutSleeps(a, b) }
     } else emptyList()
@@ -68,5 +71,5 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
             row.getValue("sleep_id").also { require(it.isNotBlank()) { "Brak identyfikatora zewnętrznej sesji snu" } }
         }.toSet()
     }
-    return TakeoutArchive(weight, fat, sleeps, files.keys, thirdPartyIds, height)
+    return TakeoutArchive(weight, fat, sleeps, files.keys, thirdPartyIds, height, resting)
 }

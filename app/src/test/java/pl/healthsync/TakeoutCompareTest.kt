@@ -7,6 +7,16 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 class TakeoutCompareTest {
+    @Test fun `daily resting heart rate skips existing day and duplicate source days`() {
+        val zone = java.time.ZoneId.of("Europe/Warsaw")
+        val time = Instant.parse("2026-06-12T00:00:00Z")
+        val row = TakeoutMeasurement(TakeoutKind.RESTING_HEART_RATE, time, 60.0, "Google Health App")
+        val existing = ExistingMeasurement(TakeoutKind.RESTING_HEART_RATE, time.plusSeconds(36000), 65.0)
+        assertEquals(ImportDecision.ALREADY_PRESENT, compareDailyRestingHeartRates(listOf(row), listOf(existing), zone).single().second)
+        assertTrue(compareDailyRestingHeartRates(listOf(row, row.copy(time = time.plusSeconds(60))), emptyList(), zone).all { it.second == ImportDecision.CONFLICT })
+        assertEquals(ImportDecision.ORIGINATES_IN_CONNECT, compareDailyRestingHeartRates(listOf(row.copy(source = "Fit Health Connect")), emptyList(), zone).single().second)
+        assertEquals(ImportDecision.INSERT, compareDailyRestingHeartRates(listOf(row), emptyList(), zone).single().second)
+    }
     private val at = Instant.parse("2026-10-14T07:00:00Z")
     private val measurement = TakeoutMeasurement(TakeoutKind.WEIGHT, at, 70.5, "Google Health App")
 

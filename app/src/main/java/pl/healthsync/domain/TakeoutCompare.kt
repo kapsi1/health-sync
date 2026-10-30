@@ -3,6 +3,7 @@ package pl.healthsync.domain
 import java.time.Instant
 import java.security.MessageDigest
 import java.time.Duration
+import java.time.ZoneId
 import kotlin.math.abs
 
 internal enum class ImportDecision { INSERT, ALREADY_PRESENT, CONFLICT, ORIGINATES_IN_CONNECT, UNKNOWN_SOURCE, SUPERSEDED }
@@ -89,6 +90,24 @@ internal fun classifyMeasurement(candidate: TakeoutMeasurement, existing: List<E
     return if (sameTime.all { abs(it.value - candidate.value) <= tolerance }) ImportDecision.ALREADY_PRESENT else ImportDecision.CONFLICT
 }
 
+/** Resting heart rate in this export is a daily summary, so don't add a second daily summary. */
+internal fun compareDailyRestingHeartRates(source: List<TakeoutMeasurement>, existing: List<ExistingMeasurement>, zone: ZoneId): List<Pair<TakeoutMeasurement, ImportDecision>> {
+    val sourceCounts = source.filter { it.source == "Google Health App" }.groupingBy { it.time.atZone(zone).toLocalDate() }.eachCount()
+    val existingDays = existing.filter { it.kind == TakeoutKind.RESTING_HEART_RATE }.map { it.time.atZone(zone).toLocalDate() }.toSet()
+    return source.map { row ->
+        require(row.kind == TakeoutKind.RESTING_HEART_RATE)
+        val date = row.time.atZone(zone).toLocalDate()
+        val decision = when {
+            row.source == "Fit Health Connect" -> ImportDecision.ORIGINATES_IN_CONNECT
+            row.source != "Google Health App" -> ImportDecision.UNKNOWN_SOURCE
+            date in existingDays -> ImportDecision.ALREADY_PRESENT
+            sourceCounts.getValue(date) != 1 -> ImportDecision.CONFLICT
+            else -> ImportDecision.INSERT
+        }
+        row to decision
+    }
+}
+
 /** An overlap alone is not enough to conclude that two sleep sessions are identical. */
 internal fun classifySleep(candidate: TakeoutSleep, existing: List<ExistingSleep>): ImportDecision {
     return compareSleep(candidate, existing).decision
@@ -116,7 +135,7 @@ internal fun compareSleep(candidate: TakeoutSleep, existing: List<ExistingSleep>
 
 /** A deterministic ID does not contain a raw measurement or a source identifier. */
 internal fun takeoutClientId(kind: String, accountKey: String, sourceKey: String): String {
-    require(kind in setOf("sleep", "weight", "body_fat", "height") && accountKey.isNotBlank() && sourceKey.isNotBlank())
+    require(kind in setOf("sleep", "weight", "body_fat", "height", "resting_heart_rate", "steps", "distance", "total_calories", "active_calories") && accountKey.isNotBlank() && sourceKey.isNotBlank())
     val digest = MessageDigest.getInstance("SHA-256")
     listOf("takeout-v1", kind, accountKey, sourceKey).forEach { field ->
         val bytes = field.toByteArray(Charsets.UTF_8)

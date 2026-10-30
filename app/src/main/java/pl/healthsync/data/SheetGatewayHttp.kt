@@ -119,12 +119,25 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
     override suspend fun addColumns(headers: List<String>) {
         if (headers.isEmpty()) return
         check(!hasUnlabeledData) { "Dane znajdują się w kolumnach bez nagłówka" }
+        ensureColumnCapacity(headerCount + headers.size)
         val cells = JSONArray().put(JSONArray(headers.map(MetricRegistry.sheetHeaders::label)))
         val range = "'daily'!${column(headerCount + 1)}1"
         call("PUT", "$base/${encode(range)}?valueInputOption=RAW", JSONObject().put("range", range).put("majorDimension", "ROWS").put("values", cells))
         this.headers = this.headers + headers
         this.visibleHeaders = this.visibleHeaders + headers.map(MetricRegistry.sheetHeaders::label)
         headerCount += headers.size
+    }
+
+    private suspend fun ensureColumnCapacity(required: Int) {
+        val meta = call("GET", "$spreadsheet?fields=${encode("sheets.properties(sheetId,title,gridProperties(columnCount))")}")
+        val sheets = meta.getJSONArray("sheets")
+        val daily = (0 until sheets.length()).map { sheets.getJSONObject(it).getJSONObject("properties") }
+            .single { it.getString("title") == "daily" }
+        val sheetId = daily.getInt("sheetId")
+        dailySheetId = sheetId
+        val available = daily.getJSONObject("gridProperties").getInt("columnCount")
+        val extra = extraColumnsNeeded(available, required)
+        if (extra > 0) call("POST", "$spreadsheet:batchUpdate", appendColumnsRequest(sheetId, extra))
     }
 
     override suspend fun updateCells(updates: List<SheetCellUpdate>) {
@@ -178,11 +191,35 @@ class SheetGatewayHttp(private val spreadsheetId: String, private val token: Str
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             }
             val code = conn.responseCode
-            if (code !in 200..299) throw SheetHttpError(code)
+            if (code !in 200..299) {
+                val response = runCatching { conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } }.getOrNull().orEmpty()
+                val detail = runCatching { JSONObject(response).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("")
+                val reason = if (detail.contains("grid limit", ignoreCase = true) || detail.contains("exceeds grid", ignoreCase = true)) "zakres przekracza rozmiar zakładki" else null
+                val operation = when {
+                    endpoint.contains("/values/") && method == "PUT" -> "zapisu nagłówków"
+                    endpoint.contains("/values/") && method == "GET" -> "odczytu danych"
+                    endpoint.contains("/values:batchUpdate") -> "zapisu komórek"
+                    endpoint.contains(":append") -> "dodawania wierszy"
+                    endpoint.contains(":batchUpdate") -> "aktualizacji układu"
+                    else -> "odczytu arkusza"
+                }
+                throw SheetHttpError(code, operation, reason)
+            }
             val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             if (text.isBlank()) JSONObject() else JSONObject(text)
         } finally { conn.disconnect() }
     }
+}
+
+internal fun extraColumnsNeeded(available: Int, required: Int): Int {
+    require(available >= 0 && required >= 0)
+    return (required - available).coerceAtLeast(0)
+}
+
+internal fun appendColumnsRequest(sheetId: Int, count: Int): JSONObject {
+    require(count > 0)
+    val dimension = JSONObject().put("sheetId", sheetId).put("dimension", "COLUMNS").put("length", count)
+    return JSONObject().put("requests", JSONArray().put(JSONObject().put("appendDimension", dimension)))
 }
 
 /** Clear the custom number format, letting Sheets display stored rounded numbers automatically. */

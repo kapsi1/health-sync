@@ -29,6 +29,10 @@ import pl.healthsync.data.TakeoutActivityInspector
 import pl.healthsync.data.ActivityPreviewDay
 import pl.healthsync.data.ActivityPreviewStatus
 import pl.healthsync.data.activityReadPermissions
+import pl.healthsync.data.activityWritePermissions
+import pl.healthsync.data.activitySessionKinds
+import pl.healthsync.data.ACTIVITY_SESSION_PREFIX
+import pl.healthsync.data.TakeoutActivityImportService
 import pl.healthsync.domain.ImportDecision
 import pl.healthsync.domain.TakeoutArchive
 import pl.healthsync.domain.TakeoutActivityKind
@@ -55,15 +59,18 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     var accountLabel by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<TakeoutPreview?>(null) }
     var activityPreview by remember { mutableStateOf<Map<TakeoutActivityKind, List<ActivityPreviewDay>>?>(null) }
+    var activityKinds by remember { mutableStateOf(TakeoutActivityKind.entries.toSet()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var progressDone by remember { mutableIntStateOf(0) }
     var progressTotal by remember { mutableIntStateOf(0) }
     var confirmImport by remember { mutableStateOf(false) }
+    var confirmActivityImport by remember { mutableStateOf(false) }
     var confirmUndo by remember { mutableStateOf<String?>(null) }
     val journal = remember { TakeoutJournalDatabase.get(context.applicationContext).journal() }
     val sessions by journal.observeSessions().collectAsState(initial = emptyList())
     val service = remember(client) { TakeoutImportService(context.applicationContext, client) }
+    val activityService = remember(client) { TakeoutActivityImportService(context.applicationContext, client) }
     val permissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) {
         message = "Zgody zaktualizowane. Ponów wybraną operację."
     }
@@ -88,7 +95,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     }
     val dateFormat = DateTimeFormatter.ofPattern("dd.MM.uuuu")
     Text("Analiza Google Takeout", style = MaterialTheme.typography.titleLarge)
-    Text("Archiwum jest odczytywane na telefonie. Obsługiwane są sen, waga, tkanka tłuszczowa i wzrost. Przed zapisem zobaczysz podgląd.", style = MaterialTheme.typography.bodySmall)
+    Text("Archiwum jest odczytywane na telefonie. Przed zapisem zobaczysz podgląd.", style = MaterialTheme.typography.bodySmall)
     val active = sessions.firstOrNull { it.status == "active" }
     val undoing = sessions.firstOrNull { it.status == "undoing" }
     if (active != null || undoing != null) {
@@ -96,17 +103,20 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
         Text(if (active != null) "Przerwany import: ${session.startDate} – ${session.endDate}." else "Przerwane wycofywanie importu: ${session.startDate} – ${session.endDate}.", style = MaterialTheme.typography.bodySmall)
         Button(onClick = {
             scope.launch {
-                val types = session.selectedTypes.split(",").map { TakeoutType.valueOf(it) }.toSet()
-                val missing = takeoutWritePermissions(types) - client.permissionController.getGrantedPermissions()
+                val activitySession = session.selectedTypes.startsWith(ACTIVITY_SESSION_PREFIX)
+                val missing = (if (activitySession) activityWritePermissions(activitySessionKinds(session.selectedTypes)) else takeoutWritePermissions(session.selectedTypes.split(",").map { TakeoutType.valueOf(it) }.toSet())) - client.permissionController.getGrantedPermissions()
                 if (missing.isNotEmpty()) { permissionLauncher.launch(missing); return@launch }
                 busy = true; message = ""; progressDone = 0; progressTotal = 0
                 try {
                     if (active != null) {
-                        val count = withContext(Dispatchers.IO) { service.resume(session.id) { done, total -> progressDone = done; progressTotal = total } }
+                        val count = withContext(Dispatchers.IO) {
+                            if (activitySession) activityService.resume(session.id) { done, total -> progressDone = done; progressTotal = total }
+                            else service.resume(session.id) { done, total -> progressDone = done; progressTotal = total }
+                        }
                         message = "Import wznowiony i zakończony: $count rekordów. Dane przygotowano do synchronizacji."
                         onQueueReady()
                     } else {
-                        withContext(Dispatchers.IO) { service.undoConnect(session.id) }
+                        withContext(Dispatchers.IO) { if (activitySession) activityService.undoConnect(session.id) else service.undoConnect(session.id) }
                         message = "Wycofano własne rekordy. Niepewne wartości w arkuszu pozostawiono."
                         onQueueReady()
                     }
@@ -119,10 +129,10 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     }
     OutlinedButton(onClick = { fileLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(if (archive == null) "Wybierz archiwum ZIP" else "Wybierz inne archiwum") }
     archive?.let { data ->
-        Text("W archiwum: sen ${data.sleeps.size}, waga ${data.weights.size}, tkanka tłuszczowa ${data.bodyFat.size}, wzrost ${data.heights.size}.", style = MaterialTheme.typography.bodySmall)
+        Text("W archiwum: sen ${data.sleeps.size}, waga ${data.weights.size}, tkanka tłuszczowa ${data.bodyFat.size}, dzienne tętno spoczynkowe ${data.restingHeartRates.size}.", style = MaterialTheme.typography.bodySmall)
         if (data.sleeps.isNotEmpty() && data.thirdPartySleepIds == null) Text("Brak pliku źródeł snu: nie można bezpiecznie ustalić, czy sesje pochodzą z zewnętrznych aplikacji.", style = MaterialTheme.typography.bodySmall)
         Text("Porównaj dane", style = MaterialTheme.typography.titleMedium)
-        TakeoutType.entries.forEach { type ->
+        TakeoutType.entries.filterNot { it == TakeoutType.HEIGHT }.forEach { type ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Checkbox(checked = type in types, enabled = !busy, onCheckedChange = { checked ->
                     types = if (checked) types + type else types - type; preview = null
@@ -130,6 +140,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 Text(type.label)
             }
         }
+        if (TakeoutType.RESTING_HEART_RATE in types) Text("Tętno spoczynkowe to podsumowanie dzienne z Takeout. Connect przyjmuje całe uderzenia na minutę, dlatego wartość zostanie zaokrąglona. Dzień z dowolnym wpisem tego rodzaju w Connect zostanie pominięty.", style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { datePicker(start) { start = it } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Od ${start.format(dateFormat)}") }
             OutlinedButton(onClick = { datePicker(end) { end = it } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Do ${end.format(dateFormat)}") }
@@ -152,9 +163,18 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 } finally { busy = false }
             }
         }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Porównaj z Health Connect") }
+        Text("Aktywność do analizy", style = MaterialTheme.typography.titleSmall)
+        TakeoutActivityKind.entries.forEach { kind ->
+            val label = when (kind) { TakeoutActivityKind.STEPS -> "Kroki"; TakeoutActivityKind.DISTANCE -> "Dystans"; TakeoutActivityKind.TOTAL_CALORIES -> "Spalone kalorie"; TakeoutActivityKind.ACTIVE_CALORIES -> "Aktywne kalorie" }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Checkbox(checked = kind in activityKinds, enabled = !busy, onCheckedChange = { checked -> activityKinds = if (checked) activityKinds + kind else activityKinds - kind; activityPreview = null })
+                Text(label)
+            }
+        }
         OutlinedButton(onClick = {
             scope.launch {
-                val kinds = TakeoutActivityKind.entries.toSet()
+                val kinds = activityKinds
+                if (kinds.isEmpty()) { message = "Wybierz rodzaje aktywności."; return@launch }
                 val missing = activityReadPermissions(kinds) - client.permissionController.getGrantedPermissions()
                 if (missing.isNotEmpty()) { permissionLauncher.launch(missing); return@launch }
                 busy = true; activityPreview = null; message = ""
@@ -204,6 +224,16 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 }
                 Text("${day.date.format(dateFormat)} · $details", style = MaterialTheme.typography.bodySmall)
             }
+        }
+        val candidateCount = result.values.sumOf { days -> days.count { it.status == ActivityPreviewStatus.ESTIMATED } }
+        if (candidateCount > 0) {
+            OutlinedTextField(value = accountLabel, onValueChange = { accountLabel = it }, enabled = !busy, label = { Text("Konto źródłowe") },
+                supportingText = { Text("Używaj tej samej nazwy konta przy kolejnych eksportach.") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            Button(onClick = {
+                if (accountLabel.isBlank()) message = "Podaj nazwę konta źródłowego."
+                else if (active != null || undoing != null) message = "Najpierw wznów przerwaną operację."
+                else confirmActivityImport = true
+            }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Importuj szacunkowe dni ($candidateCount)") }
         }
     }
     preview?.let { result ->
@@ -276,18 +306,39 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 } finally { busy = false }
             }
         }) { Text("Importuj") } }, dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Anuluj") } })
+    if (confirmActivityImport) AlertDialog(onDismissRequest = { confirmActivityImport = false }, title = { Text("Import szacunkowej aktywności") },
+        text = { Text("Do Connect trafią dzienne sumy oznaczone w podglądzie jako szacunkowe. Ich wartości mogą różnić się od Health; godzinowy rozkład aktywności nie zostanie odtworzony. Dni z danymi Connect i niejednoznaczne zostaną pominięte.") },
+        confirmButton = { TextButton(onClick = {
+            confirmActivityImport = false
+            val uri = archiveUri; val digest = archiveDigest; val reviewed = activityPreview; val kinds = activityKinds
+            if (uri == null || digest == null || reviewed == null) message = "Wybierz archiwum i wykonaj analizę ponownie."
+            else scope.launch {
+                try {
+                    val missing = activityWritePermissions(kinds) - client.permissionController.getGrantedPermissions()
+                    if (missing.isNotEmpty()) { permissionLauncher.launch(missing); return@launch }
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    busy = true; message = ""; progressDone = 0; progressTotal = 0
+                    val count = withContext(Dispatchers.IO) { activityService.start(uri, digest, kinds, start, end, accountLabel, reviewed) { done, total -> progressDone = done; progressTotal = total } }
+                    message = "Import zakończony: $count rekordów aktywności. Dane przygotowano do synchronizacji."
+                    activityPreview = null; onQueueReady()
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    message = "Import zatrzymany: ${e.message ?: e.javaClass.simpleName}."
+                } finally { busy = false }
+            }
+        }) { Text("Importuj") } }, dismissButton = { TextButton(onClick = { confirmActivityImport = false }) { Text("Anuluj") } })
     confirmUndo?.let { sessionId -> AlertDialog(onDismissRequest = { confirmUndo = null }, title = { Text("Wycofaj import") },
         text = { Text("Usunięte zostaną tylko niezmienione rekordy zapisane przez Health Sync w tym imporcie. Komórki arkusza, których pochodzenia nie można potwierdzić, pozostaną bez zmian. Warto zachować kopię Connect przed wycofaniem.") },
         confirmButton = { TextButton(onClick = {
             confirmUndo = null
             scope.launch {
                 val session = sessions.firstOrNull { it.id == sessionId } ?: return@launch
-                val types = session.selectedTypes.split(",").map { TakeoutType.valueOf(it) }.toSet()
-                val missing = takeoutWritePermissions(types) - client.permissionController.getGrantedPermissions()
+                val activitySession = session.selectedTypes.startsWith(ACTIVITY_SESSION_PREFIX)
+                val missing = (if (activitySession) activityWritePermissions(activitySessionKinds(session.selectedTypes)) else takeoutWritePermissions(session.selectedTypes.split(",").map { TakeoutType.valueOf(it) }.toSet())) - client.permissionController.getGrantedPermissions()
                 if (missing.isNotEmpty()) { permissionLauncher.launch(missing); return@launch }
                 busy = true; message = ""
                 try {
-                    withContext(Dispatchers.IO) { service.undoConnect(sessionId) }
+                    withContext(Dispatchers.IO) { if (activitySession) activityService.undoConnect(sessionId) else service.undoConnect(sessionId) }
                     message = "Wycofano własne rekordy. Niepewne wartości w arkuszu pozostawiono."
                     onQueueReady()
                 } catch (e: Exception) {

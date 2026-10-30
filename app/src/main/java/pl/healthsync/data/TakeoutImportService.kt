@@ -8,6 +8,7 @@ import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.RestingHeartRateRecord
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
@@ -28,9 +29,10 @@ internal fun takeoutWritePermissions(types: Set<TakeoutType>): Set<String> = bui
     if (TakeoutType.WEIGHT in types) add(HealthPermission.getWritePermission(WeightRecord::class))
     if (TakeoutType.FAT in types) add(HealthPermission.getWritePermission(BodyFatRecord::class))
     if (TakeoutType.HEIGHT in types) add(HealthPermission.getWritePermission(HeightRecord::class))
+    if (TakeoutType.RESTING_HEART_RATE in types) add(HealthPermission.getWritePermission(RestingHeartRateRecord::class))
 }
 
-private val takeoutSessionLock = Mutex()
+internal val takeoutSessionLock = Mutex()
 
 /** All writes require a user-reviewed preview and a durable plan; never invoked by background sync. */
 internal class TakeoutImportService(private val context: Context, private val client: HealthConnectClient) {

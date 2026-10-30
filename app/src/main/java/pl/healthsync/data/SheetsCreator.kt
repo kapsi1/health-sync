@@ -9,7 +9,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class CreatedSheet(val id: String, val url: String)
-class SheetHttpError(val code: Int) : Exception("HTTP $code")
+class SheetHttpError(val code: Int, val operation: String? = null, val explanation: String? = null) : Exception("HTTP $code")
 
 class SheetsCreator {
     suspend fun create(token: String, selected: Set<String>): CreatedSheet = withContext(Dispatchers.IO) {

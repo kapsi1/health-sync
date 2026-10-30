@@ -21,12 +21,12 @@ class DailyPreview(private val client: HealthConnectClient) {
         val start = end.minusDays(7)
         val lines = mutableListOf("Ostatnie 7 dni: $start – ${end.minusDays(1)}. Wyniki są podglądem i nie są zapisywane.")
         for (metric in MetricRegistry.all.filter { it.id in selected }) {
-            if (metric.permission !in granted) {
+            if (!granted.containsAll(requiredMetricPermissions(metric))) {
                 lines += "${metric.label}: wymaga zgody"
                 continue
             }
             try {
-                if (metric.id in setOf("hrv_rmssd", "oxygen_saturation", "respiratory_rate", "body_temperature", "vo2_max", "lean_body_mass", "body_fat")) {
+                if (metric.id in setOf("hrv_rmssd", "oxygen_saturation", "respiratory_rate_sleep", "skin_temperature_delta", "body_fat")) {
                     val values = HealthHistorySource(client).read(metric.id, DateChunk(start, end))
                     lines += "${metric.label}: ${if (values.isEmpty()) "brak danych" else values.joinToString("; ") { "${it.date}: ${it.value} ${metric.unit}" }}"
                     continue
@@ -92,16 +92,9 @@ private fun metricFor(id: String): AggregateMetric<*>? = when (id) {
     "total_calories" -> TotalCaloriesBurnedRecord.ENERGY_TOTAL
     "active_calories" -> ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL
     "distance" -> DistanceRecord.DISTANCE_TOTAL
-    "floors" -> FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL
-    "elevation" -> ElevationGainedRecord.ELEVATION_GAINED_TOTAL
     "exercise_duration" -> ExerciseSessionRecord.EXERCISE_DURATION_TOTAL
-    "heart_rate_avg" -> HeartRateRecord.BPM_AVG
-    "heart_rate_min" -> HeartRateRecord.BPM_MIN
-    "heart_rate_max" -> HeartRateRecord.BPM_MAX
     "resting_heart_rate" -> RestingHeartRateRecord.BPM_AVG
     "weight_avg" -> WeightRecord.WEIGHT_AVG
-    "height_avg" -> HeightRecord.HEIGHT_AVG
-    "hydration" -> HydrationRecord.VOLUME_TOTAL
     else -> null
 }
 
@@ -110,15 +103,8 @@ private fun valueFor(id: String, result: androidx.health.connect.client.aggregat
     "total_calories" -> result[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories?.toString()
     "active_calories" -> result[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories?.toString()
     "distance" -> result[DistanceRecord.DISTANCE_TOTAL]?.inKilometers?.toString()
-    "floors" -> result[FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL]?.toString()
-    "elevation" -> result[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters?.toString()
     "exercise_duration" -> result[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL]?.toMillis()?.div(3_600_000.0)?.toString()
-    "heart_rate_avg" -> result[HeartRateRecord.BPM_AVG]?.toString()
-    "heart_rate_min" -> result[HeartRateRecord.BPM_MIN]?.toString()
-    "heart_rate_max" -> result[HeartRateRecord.BPM_MAX]?.toString()
     "resting_heart_rate" -> result[RestingHeartRateRecord.BPM_AVG]?.toString()
     "weight_avg" -> result[WeightRecord.WEIGHT_AVG]?.inKilograms?.toString()
-    "height_avg" -> result[HeightRecord.HEIGHT_AVG]?.inMeters?.toString()
-    "hydration" -> result[HydrationRecord.VOLUME_TOTAL]?.inLiters?.toString()
     else -> null
 }

@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
         var historyJob by remember { mutableStateOf<Job?>(null) }
         val importer = remember(client) { client?.let { HistoryImport(HealthHistorySource(it), RoomHistoryStore(SyncDatabase.get(applicationContext).importDao())) } }
         val selections = remember { MetricSelection(applicationContext) }
+        LaunchedEffect(selections) { selections.migrate() }
         val selected by selections.selected.collectAsState(initial = emptySet())
         val backgroundSettings = remember { BackgroundSettings(applicationContext) }
         val background by backgroundSettings.state.collectAsState(initial = BackgroundState(0, "Sprawdzanie ustawień…"))
@@ -181,7 +182,7 @@ class MainActivity : ComponentActivity() {
             })
             if (client != null) {
                 if (tab == 1) {
-                val missing = MetricRegistry.all.filter { it.id in selected && it.permission !in granted }.map { it.permission }.toSet()
+                val missing = MetricRegistry.all.filter { it.id in selected }.flatMap(::requiredMetricPermissions).filterNot { it in granted }.toSet()
                 if (missing.isNotEmpty()) {
                     Text("Brakuje zgód dla wybranych danych.")
                     Button(onClick = { launcher.launch(missing) }) { Text("Przyznaj brakujące zgody") }
@@ -196,7 +197,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 MetricRegistry.all.groupBy { it.category }.forEach { (category, metrics) ->
-                    var expanded by rememberSaveable(category) { mutableStateOf(metrics.any { it.id in selected && it.permission !in granted }) }
+                    var expanded by rememberSaveable(category) { mutableStateOf(metrics.any { it.id in selected && !granted.containsAll(requiredMetricPermissions(it)) }) }
                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (expanded) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f).clickable { expanded = !expanded }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -211,7 +212,7 @@ class MainActivity : ComponentActivity() {
                         if (expanded) metrics.forEach { metric ->
                             HorizontalDivider()
                             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Column(Modifier.weight(1f)) { Text(metric.label); if (metric.id in selected && metric.permission !in granted) Text("Brak zgody", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                                Column(Modifier.weight(1f)) { Text(metric.label); if (metric.id in selected && !granted.containsAll(requiredMetricPermissions(metric))) Text("Brak zgody", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                                 Switch(checked = metric.id in selected, onCheckedChange = { checked -> scope.launch { selections.toggle(metric.id, checked) } }, thumbContent = if (metric.id in selected) {{ Text("✓", style = MaterialTheme.typography.labelSmall) }} else null)
                             }
                         }
@@ -266,8 +267,8 @@ class MainActivity : ComponentActivity() {
                             journal.event(runId, "Ręczna", "Rozpoczęto import od $start.")
                             val current = client.permissionController.getGrantedPermissions()
                             granted = current
-                            check(metrics.all { it.permission in current }) { "Przyznaj zgody dla wszystkich wybranych statystyk." }
-                            val earliestRead = if (metrics.any { it.id in sleepMetricIds }) start.minusDays(7) else start
+                            check(metrics.all { current.containsAll(requiredMetricPermissions(it)) }) { "Przyznaj zgody dla wszystkich wybranych statystyk." }
+                            val earliestRead = if (metrics.any { it.id in sleepMetricIds || it.id == "respiratory_rate_sleep" }) start.minusDays(7) else start
                             if (earliestRead < today.minusDays(28)) {
                                 check(available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) && HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in current) { "Przyznaj zgodę na starszą historię albo wybierz późniejszą datę." }
                             }
@@ -294,8 +295,8 @@ class MainActivity : ComponentActivity() {
                     val metrics = MetricRegistry.all.filter { it.id in selected }
                     val start = LocalDate.parse(historyStart)
                     val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
-                    val earliest = if (metrics.any { it.id in sleepMetricIds }) start.minusDays(7) else start
-                    val missing = metrics.map { it.permission }.filterNot { it in granted }.toMutableSet()
+                    val earliest = if (metrics.any { it.id in sleepMetricIds || it.id == "respiratory_rate_sleep" }) start.minusDays(7) else start
+                    val missing = metrics.flatMap(::requiredMetricPermissions).filterNot { it in granted }.toMutableSet()
                     if (earliest < today.minusDays(28) && HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY !in granted) {
                         if (!available(client, HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY)) { historyStatus = "Odczyt starszej historii nie jest dostępny na tym urządzeniu."; return }
                         missing += HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
@@ -308,9 +309,9 @@ class MainActivity : ComponentActivity() {
                         pendingPermission = ""
                         val metrics = MetricRegistry.all.filter { it.id in selected }
                         val start = LocalDate.parse(historyStart)
-                        val earliest = if (metrics.any { it.id in sleepMetricIds }) start.minusDays(7) else start
+                        val earliest = if (metrics.any { it.id in sleepMetricIds || it.id == "respiratory_rate_sleep" }) start.minusDays(7) else start
                         val historyNeeded = earliest < LocalDate.now(ZoneId.of("Europe/Warsaw")).minusDays(28)
-                        if (metrics.all { it.permission in granted } && (!historyNeeded || HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted)) startImport()
+                        if (metrics.all { granted.containsAll(requiredMetricPermissions(it)) } && (!historyNeeded || HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted)) startImport()
                         else historyStatus = "Nie przyznano wszystkich wymaganych zgód Health Connect. Sprawdź je i spróbuj ponownie."
                     }
                     if (permissionResult > 0 && pendingPermission == "background") {

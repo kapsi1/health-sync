@@ -5,7 +5,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 
-internal enum class TakeoutKind { WEIGHT, BODY_FAT, HEIGHT }
+internal enum class TakeoutKind { WEIGHT, BODY_FAT, HEIGHT, RESTING_HEART_RATE }
 internal data class TakeoutMeasurement(val kind: TakeoutKind, val time: Instant, val value: Double, val source: String)
 internal data class TakeoutStage(val id: String, val start: Instant, val end: Instant, val type: String)
 internal data class TakeoutSleep(val id: String, val start: Instant, val end: Instant, val startOffset: ZoneOffset,
@@ -21,15 +21,21 @@ private fun offset(value: String): ZoneOffset = try { ZoneOffset.of(value) } cat
 private fun Map<String, String>.required(name: String): String = getValue(name).also { require(it.isNotBlank()) { "Brak wymaganego pola eksportu" } }
 
 internal fun readTakeoutMeasurements(reader: Reader, kind: TakeoutKind): List<TakeoutMeasurement> {
-    val field = when (kind) { TakeoutKind.WEIGHT -> "weight grams"; TakeoutKind.BODY_FAT -> "body fat percentage"; TakeoutKind.HEIGHT -> "height millimeters" }
+    val field = when (kind) { TakeoutKind.WEIGHT -> "weight grams"; TakeoutKind.BODY_FAT -> "body fat percentage"; TakeoutKind.HEIGHT -> "height millimeters"; TakeoutKind.RESTING_HEART_RATE -> "beats per minute" }
     return readTakeoutCsv(reader, setOf("timestamp", field, "data source")).map { row ->
         val numeric = row.required(field).toDoubleOrNull() ?: throw IllegalArgumentException("Nieprawidłowa wartość pomiaru")
         require(numeric.isFinite() && when (kind) {
             TakeoutKind.WEIGHT -> numeric > 0.0 && numeric <= 1_000_000.0
             TakeoutKind.BODY_FAT -> numeric in 0.0..100.0
             TakeoutKind.HEIGHT -> numeric > 0.0 && numeric <= 3_000.0
-        }) { "Pomiar poza zakresem" }
-        TakeoutMeasurement(kind, timestamp(row.required("timestamp")), if (kind == TakeoutKind.BODY_FAT) numeric else numeric / 1000.0, row.required("data source"))
+            TakeoutKind.RESTING_HEART_RATE -> numeric in 1.0..300.0
+        }) { when (kind) {
+            TakeoutKind.WEIGHT -> "Nieprawidłowa wartość wagi w eksporcie"
+            TakeoutKind.BODY_FAT -> "Nieprawidłowa wartość tkanki tłuszczowej w eksporcie"
+            TakeoutKind.HEIGHT -> "Nieprawidłowa wartość wzrostu w eksporcie"
+            TakeoutKind.RESTING_HEART_RATE -> "Nieprawidłowa wartość tętna spoczynkowego w eksporcie"
+        } }
+        TakeoutMeasurement(kind, timestamp(row.required("timestamp")), if (kind == TakeoutKind.WEIGHT || kind == TakeoutKind.HEIGHT) numeric / 1000.0 else numeric, row.required("data source"))
     }
 }
 

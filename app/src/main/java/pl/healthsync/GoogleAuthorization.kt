@@ -154,7 +154,7 @@ fun GoogleAuthorization(activity: Activity, selected: Set<String>, visible: Bool
                     status = when (e.code) {
                         401, 403 -> "Dostęp do arkusza wygasł lub został odrzucony (HTTP ${e.code}). Sprawdź zgodę i konto."
                         404 -> "Arkusz lub zakładka daily są niedostępne (HTTP 404). Sprawdź dostęp albo wybierz inny arkusz. Kolejka jest zachowana."
-                        else -> "Błąd Google Sheets (HTTP ${e.code}). Kolejka została zachowana; spróbuj ponownie później."
+                        else -> "Błąd Google Sheets (HTTP ${e.code})${e.operation?.let { " podczas $it" } ?: ""}${e.explanation?.let { ": $it" } ?: ""}. Kolejka została zachowana."
                     }
                     failure = status
                 } catch (e: IllegalArgumentException) {

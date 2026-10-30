@@ -57,7 +57,7 @@ internal class TakeoutActivityInspector(private val client: HealthConnectClient)
                 TakeoutActivityKind.ACTIVE_CALORIES -> collect(ActiveCaloriesBurnedRecord::class) { it.startTime to it.endTime }
             }
             result[kind] = values.map { (date, estimate) -> ActivityPreviewDay(date,
-                if (date in present) ActivityPreviewStatus.PRESENT_IN_CONNECT else if (estimate.value == null) ActivityPreviewStatus.AMBIGUOUS else ActivityPreviewStatus.ESTIMATED, estimate)
+                if (date in present) ActivityPreviewStatus.PRESENT_IN_CONNECT else if (estimate.value == null || estimate.value <= 0) ActivityPreviewStatus.AMBIGUOUS else ActivityPreviewStatus.ESTIMATED, estimate)
             }.sortedBy { it.date }
         }
         return result

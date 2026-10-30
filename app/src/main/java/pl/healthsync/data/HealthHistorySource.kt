@@ -18,6 +18,10 @@ import pl.healthsync.sleepByEndDate
 import pl.healthsync.domain.DateChunk
 import pl.healthsync.domain.HistorySource
 import pl.healthsync.domain.ImportedValue
+import pl.healthsync.domain.SleepBreathingInterval
+import pl.healthsync.domain.SleepBreathingSession
+import pl.healthsync.domain.BreathingSample
+import pl.healthsync.domain.breathingDuringSleep
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
@@ -29,8 +33,8 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
     override suspend fun read(metricId: String, range: DateChunk): List<ImportedValue> {
         val metric = MetricRegistry.all.single { it.id == metricId }
         val granted = client.permissionController.getGrantedPermissions()
-        check(metric.permission in granted) { "Brak zgody na odczyt: ${metric.label}" }
-        val earliestRead = if (metricId in sleepMetricIds) range.start.minusDays(7) else range.start
+        check(granted.containsAll(pl.healthsync.requiredMetricPermissions(metric))) { "Brak zgody na odczyt: ${metric.label}" }
+        val earliestRead = if (metricId in sleepMetricIds || metricId == "respiratory_rate_sleep") range.start.minusDays(7) else range.start
         if (earliestRead < LocalDate.now(zone).minusDays(28)) {
             check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE &&
                 HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted) { "Brak dostępu do starszej historii" }
@@ -41,10 +45,20 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
             }
             "hrv_rmssd" -> average(HeartRateVariabilityRmssdRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.heartRateVariabilityMillis) }
             "oxygen_saturation" -> average(OxygenSaturationRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.percentage.value) }
-            "respiratory_rate" -> average(RespiratoryRateRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.rate) }
-            "body_temperature" -> average(BodyTemperatureRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.temperature.inCelsius) }
-            "vo2_max" -> average(Vo2MaxRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.vo2MillilitersPerMinuteKilogram) }
-            "lean_body_mass" -> average(LeanBodyMassRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.mass.inKilograms) }
+            "respiratory_rate_sleep" -> {
+                val sessions = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive).filter { it.endTime.atZone(zone).toLocalDate() in range.start..<range.endExclusive }
+                val sleeps = sessions.map { row -> SleepBreathingSession(row.endTime, row.stages.filter { it.stage in setOf(
+                    SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT, SleepSessionRecord.STAGE_TYPE_DEEP, SleepSessionRecord.STAGE_TYPE_REM
+                ) }.map { SleepBreathingInterval(it.startTime, it.endTime) }) }
+                val samples = readAll(RespiratoryRateRecord::class, range.start.minusDays(7), range.endExclusive).map { BreathingSample(it.time, it.rate, it.metadata.dataOrigin.packageName) }
+                breathingDuringSleep(sleeps, samples, zone).filterKeys { it >= range.start && it < range.endExclusive }.map { (date, value) -> ImportedValue(date, value) }
+            }
+            "skin_temperature_delta" -> {
+                check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_SKIN_TEMPERATURE) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) { "Health Connect nie obsługuje temperatury skóry" }
+                client.aggregateGroupByPeriod(AggregateGroupByPeriodRequest(setOf(SkinTemperatureRecord.TEMPERATURE_DELTA_AVG),
+                    TimeRangeFilter.between(range.start.atStartOfDay(), range.endExclusive.atStartOfDay()), Period.ofDays(1)))
+                    .mapNotNull { row -> row.result[SkinTemperatureRecord.TEMPERATURE_DELTA_AVG]?.let { ImportedValue(row.startTime.toLocalDate(), it.inCelsius) } }
+            }
             "sleep_duration", "sleep_awake" -> {
                 val rows = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive)
                 val days = sleepByEndDate(rows.map { it.toSleepInterval() })
@@ -90,16 +104,9 @@ private fun aggregateFor(id: String): AggregateMetric<*> = when (id) {
     "total_calories" -> TotalCaloriesBurnedRecord.ENERGY_TOTAL
     "active_calories" -> ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL
     "distance" -> DistanceRecord.DISTANCE_TOTAL
-    "floors" -> FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL
-    "elevation" -> ElevationGainedRecord.ELEVATION_GAINED_TOTAL
     "exercise_duration" -> ExerciseSessionRecord.EXERCISE_DURATION_TOTAL
-    "heart_rate_avg" -> HeartRateRecord.BPM_AVG
-    "heart_rate_min" -> HeartRateRecord.BPM_MIN
-    "heart_rate_max" -> HeartRateRecord.BPM_MAX
     "resting_heart_rate" -> RestingHeartRateRecord.BPM_AVG
     "weight_avg" -> WeightRecord.WEIGHT_AVG
-    "height_avg" -> HeightRecord.HEIGHT_AVG
-    "hydration" -> HydrationRecord.VOLUME_TOTAL
     else -> error("Nieobsługiwana metryka")
 }
 
@@ -108,15 +115,8 @@ private fun numberFor(id: String, result: AggregationResult): Double? = when (id
     "total_calories" -> result[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
     "active_calories" -> result[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
     "distance" -> result[DistanceRecord.DISTANCE_TOTAL]?.inKilometers
-    "floors" -> result[FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL]
-    "elevation" -> result[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters
     "exercise_duration" -> result[ExerciseSessionRecord.EXERCISE_DURATION_TOTAL]?.toMillis()?.div(3_600_000.0)
-    "heart_rate_avg" -> result[HeartRateRecord.BPM_AVG]?.toDouble()
-    "heart_rate_min" -> result[HeartRateRecord.BPM_MIN]?.toDouble()
-    "heart_rate_max" -> result[HeartRateRecord.BPM_MAX]?.toDouble()
     "resting_heart_rate" -> result[RestingHeartRateRecord.BPM_AVG]?.toDouble()
     "weight_avg" -> result[WeightRecord.WEIGHT_AVG]?.inKilograms
-    "height_avg" -> result[HeightRecord.HEIGHT_AVG]?.inMeters
-    "hydration" -> result[HydrationRecord.VOLUME_TOTAL]?.inLiters
     else -> null
 }

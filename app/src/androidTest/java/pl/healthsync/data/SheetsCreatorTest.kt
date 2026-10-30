@@ -9,6 +9,12 @@ import pl.healthsync.MetricRegistry
 
 @RunWith(AndroidJUnit4::class)
 class SheetsCreatorTest {
+    @Test fun appendColumnsUsesSheetDimensionWithoutTouchingExistingCells() {
+        val dimension = appendColumnsRequest(42, 2).getJSONArray("requests").getJSONObject(0).getJSONObject("appendDimension")
+        assertEquals(42, dimension.getInt("sheetId"))
+        assertEquals("COLUMNS", dimension.getString("dimension"))
+        assertEquals(2, dimension.getInt("length"))
+    }
     @Test fun calorieFormatDisplaysIntegersWithoutChangingValues() {
         val request = integerNumberFormatRequest(42, 2).getJSONObject("repeatCell")
         assertEquals("userEnteredFormat.numberFormat", request.getString("fields"))

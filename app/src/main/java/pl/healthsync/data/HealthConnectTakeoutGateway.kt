@@ -7,6 +7,11 @@ import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.RestingHeartRateRecord
+import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import pl.healthsync.domain.TakeoutWriteCandidate
@@ -33,7 +38,12 @@ internal fun takeoutRecordTime(record: Record): Instant = when (record) {
     is WeightRecord -> record.time
     is BodyFatRecord -> record.time
     is HeightRecord -> record.time
+    is RestingHeartRateRecord -> record.time
     is SleepSessionRecord -> record.startTime
+    is StepsRecord -> record.startTime
+    is DistanceRecord -> record.startTime
+    is TotalCaloriesBurnedRecord -> record.startTime
+    is ActiveCaloriesBurnedRecord -> record.startTime
     else -> error("Nieobsługiwany rekord Takeout")
 }
 
@@ -60,6 +70,7 @@ internal fun takeoutPayloadCandidate(record: Record): TakeoutWriteCandidate {
             add(record.time.toString()); add(record.zoneOffset?.id ?: "")
             add(java.lang.Double.toHexString(record.height.inMeters)); "height"
         }
+        is RestingHeartRateRecord -> { add(record.time.toString()); add(record.zoneOffset?.id ?: ""); add(record.beatsPerMinute.toString()); "resting_heart_rate" }
         is SleepSessionRecord -> {
             add(record.startTime.toString()); add(record.endTime.toString())
             add(record.startZoneOffset?.id ?: ""); add(record.endZoneOffset?.id ?: "")
@@ -69,10 +80,26 @@ internal fun takeoutPayloadCandidate(record: Record): TakeoutWriteCandidate {
             stages.forEach { add(it.startTime.toString()); add(it.endTime.toString()); add(it.stage.toString()) }
             "sleep"
         }
+        is StepsRecord -> { add(record.startTime.toString()); add(record.endTime.toString()); add(record.startZoneOffset?.id ?: ""); add(record.endZoneOffset?.id ?: ""); add(record.count.toString()); "steps" }
+        is DistanceRecord -> { add(record.startTime.toString()); add(record.endTime.toString()); add(record.startZoneOffset?.id ?: ""); add(record.endZoneOffset?.id ?: ""); add(java.lang.Double.toHexString(record.distance.inMeters)); "distance" }
+        is TotalCaloriesBurnedRecord -> { add(record.startTime.toString()); add(record.endTime.toString()); add(record.startZoneOffset?.id ?: ""); add(record.endZoneOffset?.id ?: ""); add(java.lang.Double.toHexString(record.energy.inKilocalories)); "total_calories" }
+        is ActiveCaloriesBurnedRecord -> { add(record.startTime.toString()); add(record.endTime.toString()); add(record.startZoneOffset?.id ?: ""); add(record.endZoneOffset?.id ?: ""); add(java.lang.Double.toHexString(record.energy.inKilocalories)); "active_calories" }
         else -> error("Nieobsługiwany rekord Takeout")
     }
     add(kind)
     return TakeoutWriteCandidate(id, kind, digest.digest().joinToString("") { "%02x".format(it) })
+}
+
+/** Connect may fill a missing offset with the local offset at the measurement instant. */
+internal fun takeoutPayloadMatches(expected: Record, actual: Record): Boolean {
+    if (takeoutPayloadCandidate(expected) == takeoutPayloadCandidate(actual)) return true
+    if (expected is RestingHeartRateRecord && actual is RestingHeartRateRecord && expected.zoneOffset == null &&
+        actual.zoneOffset == java.time.ZoneId.of("Europe/Warsaw").rules.getOffset(expected.time)) {
+        val normalized = RestingHeartRateRecord(time = actual.time, zoneOffset = null,
+            beatsPerMinute = actual.beatsPerMinute, metadata = actual.metadata)
+        return takeoutPayloadCandidate(expected) == takeoutPayloadCandidate(normalized)
+    }
+    return false
 }
 
 /** Only created after archive origin and candidate selection have already been checked. */
@@ -111,6 +138,7 @@ internal class HealthConnectTakeoutGateway(
             is WeightRecord -> TakeoutType.WEIGHT
             is BodyFatRecord -> TakeoutType.FAT
             is HeightRecord -> TakeoutType.HEIGHT
+            is RestingHeartRateRecord -> TakeoutType.RESTING_HEART_RATE
             is SleepSessionRecord -> TakeoutType.SLEEP
             else -> error("Nieobsługiwany rekord")
         }
@@ -118,6 +146,7 @@ internal class HealthConnectTakeoutGateway(
             TakeoutType.WEIGHT -> HealthPermission.getWritePermission(WeightRecord::class)
             TakeoutType.FAT -> HealthPermission.getWritePermission(BodyFatRecord::class)
             TakeoutType.HEIGHT -> HealthPermission.getWritePermission(HeightRecord::class)
+            TakeoutType.RESTING_HEART_RATE -> HealthPermission.getWritePermission(RestingHeartRateRecord::class)
             TakeoutType.SLEEP -> HealthPermission.getWritePermission(SleepSessionRecord::class)
         }
         check(client.permissionController.getGrantedPermissions().containsAll(takeoutReadPermissions(setOf(type)) + write)) { "Brak wymaganej zgody Health Connect" }
@@ -125,6 +154,12 @@ internal class HealthConnectTakeoutGateway(
             is WeightRecord -> readAll(WeightRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter { it.time == row.time }
             is BodyFatRecord -> readAll(BodyFatRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter { it.time == row.time }
             is HeightRecord -> readAll(HeightRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter { it.time == row.time }
+            is RestingHeartRateRecord -> {
+                val zone = java.time.ZoneId.of("Europe/Warsaw")
+                val day = row.time.atZone(zone).toLocalDate()
+                readAll(RestingHeartRateRecord::class, TimeRangeFilter.between(day.atStartOfDay(zone).toInstant(), day.plusDays(1).atStartOfDay(zone).toInstant()))
+                    .filter { it.time.atZone(zone).toLocalDate() == day }
+            }
             is SleepSessionRecord -> readAll(SleepSessionRecord::class, TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z"))).filter {
                 it.startTime < planned.sleepSourceEnd!! && planned.sleepSourceStart!! < it.endTime && !isKnownSleepSibling(planned, it)
             }
@@ -133,7 +168,7 @@ internal class HealthConnectTakeoutGateway(
         val owned = existing.filter { it.metadata.dataOrigin.packageName == ownPackage && it.metadata.clientRecordId == candidate.clientId }
         if (existing.size > owned.size || owned.size > 1) return TakeoutWriteCheck.Blocked("W Health Connect pojawiły się inne nakładające się dane")
         val match = owned.singleOrNull() ?: return TakeoutWriteCheck.Missing
-        if (takeoutPayloadCandidate(match) != candidate) return TakeoutWriteCheck.Blocked("Poprzednio zapisany rekord został zmieniony")
+        if (!takeoutPayloadMatches(planned.record, match)) return TakeoutWriteCheck.Blocked("Poprzednio zapisany rekord został zmieniony")
         return TakeoutWriteCheck.AlreadyWritten(TakeoutWriteReceipt(match.metadata.id, match.metadata.lastModifiedTime.toString()))
     }
 
@@ -158,6 +193,7 @@ internal class HealthConnectTakeoutGateway(
                 "weight" -> TakeoutType.WEIGHT
                 "body_fat" -> TakeoutType.FAT
                 "height" -> TakeoutType.HEIGHT
+                "resting_heart_rate" -> TakeoutType.RESTING_HEART_RATE
                 "sleep" -> TakeoutType.SLEEP
                 else -> error("Nieobsługiwany typ rekordu")
             }
@@ -165,10 +201,15 @@ internal class HealthConnectTakeoutGateway(
                 TakeoutType.WEIGHT -> HealthPermission.getWritePermission(WeightRecord::class)
                 TakeoutType.FAT -> HealthPermission.getWritePermission(BodyFatRecord::class)
                 TakeoutType.HEIGHT -> HealthPermission.getWritePermission(HeightRecord::class)
+                TakeoutType.RESTING_HEART_RATE -> HealthPermission.getWritePermission(RestingHeartRateRecord::class)
                 TakeoutType.SLEEP -> HealthPermission.getWritePermission(SleepSessionRecord::class)
             }
             check(client.permissionController.getGrantedPermissions().containsAll(takeoutReadPermissions(setOf(type)) + write)) { "Brak wymaganej zgody Health Connect" }
-            val filter = if (type == TakeoutType.SLEEP) TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")) else {
+            val filter = if (type == TakeoutType.SLEEP) TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")) else if (type == TakeoutType.RESTING_HEART_RATE) {
+                val zone = java.time.ZoneId.of("Europe/Warsaw")
+                val dates = group.map { (_, item) -> takeoutRecordTime(item.record).atZone(zone).toLocalDate() }
+                TimeRangeFilter.between(dates.min().atStartOfDay(zone).toInstant(), dates.max().plusDays(1).atStartOfDay(zone).toInstant())
+            } else {
                 val times = group.map { (_, item) -> takeoutRecordTime(item.record) }
                 TimeRangeFilter.between(times.min().minusSeconds(1), times.max().plusSeconds(1))
             }
@@ -176,12 +217,15 @@ internal class HealthConnectTakeoutGateway(
                 TakeoutType.WEIGHT -> readAll(WeightRecord::class, filter)
                 TakeoutType.FAT -> readAll(BodyFatRecord::class, filter)
                 TakeoutType.HEIGHT -> readAll(HeightRecord::class, filter)
+                TakeoutType.RESTING_HEART_RATE -> readAll(RestingHeartRateRecord::class, filter)
                 TakeoutType.SLEEP -> readAll(SleepSessionRecord::class, filter)
             }
             val byTime = if (type == TakeoutType.SLEEP) emptyMap() else existing.groupBy(::takeoutRecordTime)
+            val byDay = if (type == TakeoutType.RESTING_HEART_RATE) existing.groupBy { takeoutRecordTime(it).atZone(java.time.ZoneId.of("Europe/Warsaw")).toLocalDate() } else emptyMap()
             for ((candidate, item) in group) {
                 val relevant: List<Record> = when (val row = item.record) {
                     is WeightRecord, is BodyFatRecord, is HeightRecord -> byTime[takeoutRecordTime(row)].orEmpty()
+                    is RestingHeartRateRecord -> byDay[row.time.atZone(java.time.ZoneId.of("Europe/Warsaw")).toLocalDate()].orEmpty()
                     is SleepSessionRecord -> existing.filterIsInstance<SleepSessionRecord>().filter {
                         it.startTime < item.sleepSourceEnd!! && item.sleepSourceStart!! < it.endTime && !isKnownSleepSibling(item, it)
                     }
@@ -191,7 +235,7 @@ internal class HealthConnectTakeoutGateway(
                 result[candidate.clientId] = when {
                     relevant.size > owned.size || owned.size > 1 -> TakeoutWriteCheck.Blocked("W Health Connect pojawiły się inne nakładające się dane")
                     owned.isEmpty() -> TakeoutWriteCheck.Missing
-                    takeoutPayloadCandidate(owned.single()) != candidate -> TakeoutWriteCheck.Blocked("Poprzednio zapisany rekord został zmieniony")
+                    !takeoutPayloadMatches(item.record, owned.single()) -> TakeoutWriteCheck.Blocked("Poprzednio zapisany rekord został zmieniony")
                     else -> owned.single().let { TakeoutWriteCheck.AlreadyWritten(TakeoutWriteReceipt(it.metadata.id, it.metadata.lastModifiedTime.toString())) }
                 }
             }
@@ -213,6 +257,7 @@ internal class HealthConnectTakeoutGateway(
             is WeightRecord -> TakeoutType.WEIGHT to HealthPermission.getWritePermission(WeightRecord::class)
             is BodyFatRecord -> TakeoutType.FAT to HealthPermission.getWritePermission(BodyFatRecord::class)
             is HeightRecord -> TakeoutType.HEIGHT to HealthPermission.getWritePermission(HeightRecord::class)
+            is RestingHeartRateRecord -> TakeoutType.RESTING_HEART_RATE to HealthPermission.getWritePermission(RestingHeartRateRecord::class)
             is SleepSessionRecord -> TakeoutType.SLEEP to HealthPermission.getWritePermission(SleepSessionRecord::class)
             else -> return TakeoutUndoCheck.Blocked("Nieobsługiwany typ rekordu")
         }
@@ -222,6 +267,7 @@ internal class HealthConnectTakeoutGateway(
             is WeightRecord -> readAll(WeightRecord::class, TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")))
             is BodyFatRecord -> readAll(BodyFatRecord::class, TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")))
             is HeightRecord -> readAll(HeightRecord::class, TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")))
+            is RestingHeartRateRecord -> readAll(RestingHeartRateRecord::class, TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")))
             is SleepSessionRecord -> readAll(SleepSessionRecord::class, TimeRangeFilter.after(Instant.parse("1900-01-01T00:00:00Z")))
             else -> error("Nieobsługiwany rekord")
         }
@@ -230,7 +276,7 @@ internal class HealthConnectTakeoutGateway(
         if (matches.size != 1) return TakeoutUndoCheck.Blocked("Niejednoznaczny identyfikator rekordu")
         val record = matches.single()
         if (record.metadata.dataOrigin.packageName != ownPackage || record.metadata.clientRecordId != entry.candidate.clientId ||
-            record.metadata.lastModifiedTime.toString() != entry.receipt.lastModified || takeoutPayloadCandidate(record) != entry.candidate) {
+            record.metadata.lastModifiedTime.toString() != entry.receipt.lastModified || !takeoutPayloadMatches(planned.record, record)) {
             return TakeoutUndoCheck.Blocked("Rekord został zmieniony lub nie należy do Health Sync")
         }
         return TakeoutUndoCheck.Unchanged
@@ -242,6 +288,7 @@ internal class HealthConnectTakeoutGateway(
             is WeightRecord -> WeightRecord::class
             is BodyFatRecord -> BodyFatRecord::class
             is HeightRecord -> HeightRecord::class
+            is RestingHeartRateRecord -> RestingHeartRateRecord::class
             is SleepSessionRecord -> SleepSessionRecord::class
             else -> error("Nieobsługiwany typ rekordu")
         }

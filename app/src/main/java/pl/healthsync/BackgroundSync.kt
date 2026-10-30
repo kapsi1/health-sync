@@ -95,9 +95,11 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             if (client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND) != HealthConnectFeatures.FEATURE_STATUS_AVAILABLE || HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND !in granted) {
                 record("Odczyt w tle wymaga zgody Health Connect. Otwórz aplikację i przyznaj zgodę.", error = true); return Result.success()
             }
-            val selected = MetricSelection(applicationContext).selected.first()
+            val selections = MetricSelection(applicationContext)
+            selections.migrate()
+            val selected = selections.selected.first()
             val metrics = MetricRegistry.all.filter { it.id in selected }
-            if (metrics.any { it.permission !in granted }) { record("Brakuje zgód Health Connect dla wybranych statystyk.", error = true); return Result.success() }
+            if (metrics.any { !granted.containsAll(requiredMetricPermissions(it)) }) { record("Brakuje zgód Health Connect dla wybranych statystyk.", error = true); return Result.success() }
             val db = SyncDatabase.get(applicationContext)
             val today = LocalDate.now(ZoneId.of("Europe/Warsaw"))
             val changesAlert = HealthChanges(applicationContext, client, db.importDao()).scan(selected)
@@ -128,7 +130,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
         catch (e: SheetHttpError) {
             if (e.code == 401 || e.code == 403) { record("Dostęp Google wygasł lub został odrzucony. Sprawdź zgodę w aplikacji.", error = true); return Result.success() }
             if (e.code == 404) { record("Arkusz lub zakładka daily są niedostępne (HTTP 404). Sprawdź dostęp albo wybierz inny arkusz; kolejka jest zachowana.", error = true); return Result.success() }
-            record("Błąd Google Sheets (${e.code}); kolejka jest zachowana.", error = true)
+            record("Błąd Google Sheets (${e.code})${e.operation?.let { " podczas $it" } ?: ""}${e.explanation?.let { ": $it" } ?: ""}; kolejka jest zachowana.", error = true)
             return if (e.code == 429 || e.code >= 500) Result.retry() else Result.success()
         } catch (_: IOException) { record("Brak połączenia. Dane lokalne i kolejka są zachowane; ponowimy próbę.", error = true); return Result.retry() }
         catch (_: IllegalArgumentException) { record("Nieprawidłowe nagłówki lub daty w arkuszu. Sprawdź zakładkę daily i usuń powtórzone nazwy; kolejka jest zachowana.", error = true); return Result.success() }
