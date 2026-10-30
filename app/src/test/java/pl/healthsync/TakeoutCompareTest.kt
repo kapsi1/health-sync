@@ -30,6 +30,7 @@ class TakeoutCompareTest {
         assertEquals(ImportDecision.INSERT, classifySleep(sleep, listOf(ExistingSleep(at.plusSeconds(3600), at.plusSeconds(7200)))))
         assertEquals(ImportDecision.CONFLICT, classifySleep(sleep.copy(minutesAsleep = 10), emptyList()))
         assertEquals(ImportDecision.CONFLICT, classifySleep(sleep.copy(stages = emptyList()), emptyList()))
+        assertEquals(ImportDecision.CONFLICT, classifySleep(sleep.copy(stages = listOf(stage.copy(start = at.plusSeconds(1)))), emptyList()))
     }
     @Test fun `client ids are deterministic and distinct by kind and source`() {
         val first = takeoutClientId("sleep", "account", "example")
@@ -38,5 +39,39 @@ class TakeoutCompareTest {
         assertNotEquals(first, takeoutClientId("weight", "account", "example"))
         assertNotEquals(first, takeoutClientId("sleep", "other-account", "example"))
         assertFalse(first.contains("example"))
+    }
+    @Test fun `all members of overlapping sleep groups conflict but adjacent sessions do not`() {
+        fun session(id: String, start: Long, end: Long) = TakeoutSleep(id, at.plusSeconds(start), at.plusSeconds(end), ZoneOffset.UTC, ZoneOffset.UTC, "DERIVED", at, null, emptyList())
+        assertEquals(setOf("a", "b", "c"), overlappingTakeoutSleepIds(listOf(session("c", 19, 30), session("a", 0, 10), session("d", 30, 40), session("b", 5, 20))))
+    }
+    @Test fun `sleep conflict reasons distinguish boundaries and absent stages`() {
+        val stage = TakeoutStage("s", at, at.plusSeconds(3600), "LIGHT")
+        val candidate = TakeoutSleep("id", at, at.plusSeconds(3600), ZoneOffset.UTC, ZoneOffset.UTC, "DERIVED", at, 60, listOf(stage))
+        assertEquals(SleepConflictReason.BOUNDS_DIFFER, compareSleep(candidate, listOf(ExistingSleep(at.plusSeconds(1), at.plusSeconds(3600)))).reason)
+        assertEquals(SleepConflictReason.EXISTING_NO_STAGES, compareSleep(candidate, listOf(ExistingSleep(at, at.plusSeconds(3600)))).reason)
+        assertEquals(SleepConflictReason.STAGES_DIFFER, compareSleep(candidate, listOf(ExistingSleep(at, at.plusSeconds(3600), listOf(ExistingSleepStage(at, at.plusSeconds(3600), "REM"))))).reason)
+        assertEquals(SleepConflictReason.SOURCE_OVERLAP, compareSleep(candidate, emptyList(), true).reason)
+    }
+
+    @Test fun `v2 is selected only for clear pairs and multiple v2 are conflicts`() {
+        val stage = TakeoutStage("stage", at, at.plusSeconds(3600), "LIGHT")
+        val base = TakeoutSleep("v1", at, at.plusSeconds(3600), ZoneOffset.UTC, ZoneOffset.UTC, "DERIVED", at, 60, listOf(stage), "sleep_session_v1")
+        val v2 = base.copy(id = "v2", algorithmVersion = "sleep_session_v2")
+        val decisions = resolveSleepV2(listOf(base, v2), emptyList())
+        assertEquals(ImportDecision.SUPERSEDED, decisions.getValue("v1").decision)
+        assertEquals(ImportDecision.INSERT, decisions.getValue("v2").decision)
+        val ambiguous = resolveSleepV2(listOf(base, v2, v2.copy(id = "v2b")), emptyList())
+        assertTrue(ambiguous.values.all { it.reason == SleepConflictReason.NO_UNIQUE_V2 })
+        assertEquals(SleepConflictReason.NO_UNIQUE_V2, resolveSleepV2(listOf(base), emptyList()).getValue("v1").reason)
+        assertEquals(ImportDecision.UNKNOWN_SOURCE, resolveSleepV2(listOf(base, v2), emptyList(), null).getValue("v2").decision)
+        assertEquals(ImportDecision.UNKNOWN_SOURCE, resolveSleepV2(listOf(base, v2), emptyList(), setOf("v1")).getValue("v2").decision)
+    }
+
+    @Test fun `v2 is blocked when other version overlaps existing connect session`() {
+        val stage = TakeoutStage("stage", at.plusSeconds(60), at.plusSeconds(3600), "LIGHT")
+        val v2 = TakeoutSleep("v2", at.plusSeconds(60), at.plusSeconds(3600), ZoneOffset.UTC, ZoneOffset.UTC, "DERIVED", at, 59, listOf(stage), "sleep_session_v2")
+        val v1 = v2.copy(id = "v1", start = at, algorithmVersion = "sleep_session_v1")
+        val existing = ExistingSleep(at, at.plusSeconds(30))
+        assertEquals(SleepConflictReason.ALTERNATIVE_IN_CONNECT, resolveSleepV2(listOf(v1, v2), listOf(existing)).getValue("v2").reason)
     }
 }

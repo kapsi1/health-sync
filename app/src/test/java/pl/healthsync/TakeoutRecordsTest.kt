@@ -20,6 +20,11 @@ class TakeoutRecordsTest {
         assertEquals(17.8, readTakeoutMeasurements(StringReader(csv), TakeoutKind.BODY_FAT).single().value, 0.0)
     }
 
+    @Test fun `height converts millimeters into meters`() {
+        val csv = "timestamp,height millimeters,data source\n2026-10-14T06:00:00Z,1750,Google Health App\n"
+        assertEquals(1.75, readTakeoutMeasurements(StringReader(csv), TakeoutKind.HEIGHT).single().value, 0.0)
+    }
+
     @Test(expected = IllegalArgumentException::class) fun `rejects invalid values`() {
         readTakeoutMeasurements(StringReader("timestamp,body fat percentage,data source\n2026-10-14T06:00:00Z,101,Google Health App\n"), TakeoutKind.BODY_FAT)
     }
@@ -33,6 +38,13 @@ class TakeoutRecordsTest {
         val sleep = readTakeoutSleeps(StringReader(sleeps), StringReader(stages)).single()
         assertEquals(listOf("a", "b"), sleep.stages.map { it.id })
         assertEquals(450L, sleep.minutesAsleep)
+    }
+
+    @Test fun `sleep algorithm version is retained`() {
+        val sleeps = "sleep_id,sleep_start,sleep_end,start_utc_offset,end_utc_offset,data_source,sleep_last_updated,minutes_asleep,algorithm_version\n" +
+            "s1,2026-10-28T22:00:00Z,2026-10-29T06:00:00Z,+01:00,+01:00,DERIVED,2026-10-29T06:10:00Z,450,sleep_session_v2\n"
+        val stages = "sleep_id,sleep_stage_id,sleep_stage_start,sleep_stage_end,sleep_stage_type\n"
+        assertEquals("sleep_session_v2", readTakeoutSleeps(StringReader(sleeps), StringReader(stages)).single().algorithmVersion)
     }
 
     @Test(expected = IllegalArgumentException::class) fun `overlapping sleep stages are rejected`() {

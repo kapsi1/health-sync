@@ -28,6 +28,10 @@ class TakeoutArchiveTest {
     @Test(expected = IllegalArgumentException::class) fun `does not accept missing sleep stages`() {
         readTakeoutArchive(ByteArrayInputStream(zip("Takeout/Google Health/Health Fitness Data_GoogleData/UserSleeps_2026-01-01.csv" to "")))
     }
+    @Test fun `reads height from recognized path`() {
+        val input = zip("Takeout/Google Health/Physical Activity_GoogleData/Height/height.csv" to "timestamp,height millimeters,data source\n2026-01-01T00:00:00Z,1750,Google Health App\n")
+        assertEquals(1.75, readTakeoutArchive(ByteArrayInputStream(input)).heights.single().value, 0.0)
+    }
     @Test(expected = IllegalArgumentException::class) fun `does not combine ambiguous account exports`() {
         val path = "Takeout/Google Health/Physical Activity_GoogleData/Weight/weight.csv"
         readTakeoutArchive(ByteArrayInputStream(zip(path to "", "another/$path" to "")))

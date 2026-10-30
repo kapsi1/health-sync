@@ -47,6 +47,16 @@ class ImportDaoTest {
         assertEquals(listOf(row), dao.observations("steps"))
     }
 
+    @Test fun explicitUndoReconciliationRemovesOnlyTheMissingLocalMetric() = runTest {
+        dao.commitChunk(checkpoint, listOf(row))
+        dao.commitChunk(ImportCheckpoint("weight_avg", "2026-10-01", "2026-11-01", "2026-11-01T00:00:00Z"), listOf(row.copy(metricId = "weight_avg", value = 70.0)))
+        dao.reconcileAfterUndo("weight_avg", row.date, null)
+        assertTrue(dao.observations("weight_avg").isEmpty())
+        assertEquals(listOf(row), dao.observations("steps"))
+        assertTrue(dao.checkpoints("weight_avg").isEmpty())
+        assertEquals(1, dao.checkpoints("steps").size)
+    }
+
     @Test fun databaseFailureRollsBackDataAndQueue() = runTest {
         db.openHelper.writableDatabase.execSQL("CREATE TRIGGER reject_checkpoint BEFORE INSERT ON ImportCheckpoint BEGIN SELECT RAISE(ABORT, 'test'); END")
         try {

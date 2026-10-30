@@ -37,9 +37,23 @@ interface ManualHistoryStore : HistoryStore {
     suspend fun finishManual(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate)
 }
 
+interface UndoHistoryStore : HistoryStore {
+    /** Replace or remove the local value only after a successful complete read of that day. */
+    suspend fun reconcileAfterUndo(metricId: String, date: LocalDate, value: ImportedValue?)
+}
+
 private val historyImportLock = Mutex()
 
 class HistoryImport(private val source: HistorySource, private val store: HistoryStore, private val today: () -> LocalDate = { LocalDate.now(java.time.ZoneId.of("Europe/Warsaw")) }) {
+
+    suspend fun reconcileAfterUndo(affected: Map<String, Set<LocalDate>>) = historyImportLock.withLock {
+        val undoStore = store as? UndoHistoryStore ?: error("Brak obsługi przeliczania po wycofaniu")
+        for ((metric, dates) in affected) for (date in dates.sorted()) {
+            val values = source.read(metric, DateChunk(date, date.plusDays(1)))
+            check(values.size <= 1 && values.all { it.date == date }) { "Nieprawidłowy wynik odczytu po wycofaniu" }
+            undoStore.reconcileAfterUndo(metric, date, values.singleOrNull())
+        }
+    }
 
     suspend fun run(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate, refresh: Boolean, progress: (ImportProgress) -> Unit) = historyImportLock.withLock {
         require(metricIds.isNotEmpty() && metricIds.distinct().size == metricIds.size)

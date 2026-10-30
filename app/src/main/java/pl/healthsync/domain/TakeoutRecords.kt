@@ -5,11 +5,12 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 
-internal enum class TakeoutKind { WEIGHT, BODY_FAT }
+internal enum class TakeoutKind { WEIGHT, BODY_FAT, HEIGHT }
 internal data class TakeoutMeasurement(val kind: TakeoutKind, val time: Instant, val value: Double, val source: String)
 internal data class TakeoutStage(val id: String, val start: Instant, val end: Instant, val type: String)
 internal data class TakeoutSleep(val id: String, val start: Instant, val end: Instant, val startOffset: ZoneOffset,
-    val endOffset: ZoneOffset, val source: String, val lastUpdated: Instant, val minutesAsleep: Long?, val stages: List<TakeoutStage>)
+    val endOffset: ZoneOffset, val source: String, val lastUpdated: Instant, val minutesAsleep: Long?, val stages: List<TakeoutStage>,
+    val algorithmVersion: String? = null)
 
 private fun timestamp(value: String): Instant = try { Instant.parse(value) } catch (_: DateTimeParseException) {
     throw IllegalArgumentException("Nieprawidłowy czas UTC w eksporcie")
@@ -20,11 +21,15 @@ private fun offset(value: String): ZoneOffset = try { ZoneOffset.of(value) } cat
 private fun Map<String, String>.required(name: String): String = getValue(name).also { require(it.isNotBlank()) { "Brak wymaganego pola eksportu" } }
 
 internal fun readTakeoutMeasurements(reader: Reader, kind: TakeoutKind): List<TakeoutMeasurement> {
-    val field = if (kind == TakeoutKind.WEIGHT) "weight grams" else "body fat percentage"
+    val field = when (kind) { TakeoutKind.WEIGHT -> "weight grams"; TakeoutKind.BODY_FAT -> "body fat percentage"; TakeoutKind.HEIGHT -> "height millimeters" }
     return readTakeoutCsv(reader, setOf("timestamp", field, "data source")).map { row ->
         val numeric = row.required(field).toDoubleOrNull() ?: throw IllegalArgumentException("Nieprawidłowa wartość pomiaru")
-        require(numeric.isFinite() && if (kind == TakeoutKind.WEIGHT) numeric > 0.0 && numeric <= 1_000_000.0 else numeric in 0.0..100.0) { "Pomiar poza zakresem" }
-        TakeoutMeasurement(kind, timestamp(row.required("timestamp")), if (kind == TakeoutKind.WEIGHT) numeric / 1000.0 else numeric, row.required("data source"))
+        require(numeric.isFinite() && when (kind) {
+            TakeoutKind.WEIGHT -> numeric > 0.0 && numeric <= 1_000_000.0
+            TakeoutKind.BODY_FAT -> numeric in 0.0..100.0
+            TakeoutKind.HEIGHT -> numeric > 0.0 && numeric <= 3_000.0
+        }) { "Pomiar poza zakresem" }
+        TakeoutMeasurement(kind, timestamp(row.required("timestamp")), if (kind == TakeoutKind.BODY_FAT) numeric else numeric / 1000.0, row.required("data source"))
     }
 }
 
@@ -62,6 +67,7 @@ internal fun readTakeoutSleeps(sleepReader: Reader, stageReader: Reader): List<T
             (it.toLongOrNull() ?: throw IllegalArgumentException("Nieprawidłowy czas snu")).also { n -> require(n >= 0) }
         }
         TakeoutSleep(id, start, end, offset(row.required("start_utc_offset")), offset(row.required("end_utc_offset")),
-            row.required("data_source"), timestamp(row.required("sleep_last_updated")), minutes, stages)
+            row.required("data_source"), timestamp(row.required("sleep_last_updated")), minutes, stages,
+            row["algorithm_version"]?.takeIf { it.isNotBlank() })
     }
 }

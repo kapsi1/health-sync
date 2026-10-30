@@ -3,12 +3,18 @@ package pl.healthsync.data
 import pl.healthsync.MetricRegistry
 import pl.healthsync.domain.DateChunk
 import pl.healthsync.domain.ManualHistoryStore
+import pl.healthsync.domain.UndoHistoryStore
 import pl.healthsync.domain.chunks
 import java.time.LocalDate
 import pl.healthsync.domain.ImportedValue
 import java.time.Instant
 
-class RoomHistoryStore(private val dao: ImportDao) : ManualHistoryStore {
+class RoomHistoryStore(private val dao: ImportDao) : ManualHistoryStore, UndoHistoryStore {
+    override suspend fun reconcileAfterUndo(metricId: String, date: LocalDate, value: ImportedValue?) {
+        val metric = MetricRegistry.all.single { it.id == metricId }
+        val row = value?.let { DailyObservation(it.date.toString(), metricId, it.value, metric.unit, Instant.now().toString()) }
+        dao.reconcileAfterUndo(metricId, date.toString(), row)
+    }
     override suspend fun prepareManual(metricIds: List<String>, start: LocalDate, endExclusive: LocalDate): LocalDate =
         LocalDate.parse(dao.prepareManualSession(start.toString(), endExclusive.toString(), metricIds, chunks(start, endExclusive).map { it.start.toString() to it.endExclusive.toString() }).endExclusive)
 

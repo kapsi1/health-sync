@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
         var permissionResult by remember { mutableIntStateOf(0) }
         var requestedHours by remember { mutableIntStateOf(0) }
         var tab by rememberSaveable { mutableIntStateOf(0) }
+        var takeoutScreen by rememberSaveable { mutableStateOf(false) }
         var granted by remember { mutableStateOf(emptySet<String>()) }
         val lifecycle = LocalLifecycleOwner.current.lifecycle
         DisposableEffect(lifecycle, client) {
@@ -224,6 +225,9 @@ class MainActivity : ComponentActivity() {
 
                 }
                 if (tab == 0) {
+                if (takeoutScreen) {
+                    TakeoutPreviewScreen(client, onClose = { takeoutScreen = false }, onQueueReady = { syncRequest++ })
+                } else {
                 Text("Importuj od", style = MaterialTheme.typography.labelLarge)
                 val chosenDate = LocalDate.parse(historyStart)
                 val displayedDate = chosenDate.format(DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.forLanguageTag("pl-PL")))
@@ -360,6 +364,8 @@ class MainActivity : ComponentActivity() {
                         Text(if (lastTime == null) "Brak zapisanej automatycznej synchronizacji" else "$label: ${relativeTime(lastTime, clockNow)}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                OutlinedButton(onClick = { takeoutScreen = true }, enabled = historyJob == null && !googleBusy && !syncBusy, modifier = Modifier.fillMaxWidth()) { Text("Analizuj Google Takeout") }
+                }
                 }
                 GoogleAuthorization(this@MainActivity, selected, tab == 2, syncRequest, manualRunId, historyJob != null, { if (syncRequest > 0) historyStatus = if (isGoogleError(it)) it else "" }, { googleBusy = it }, { syncBusy = it })
                 if (tab == 3) {
@@ -462,6 +468,6 @@ private suspend fun diagnose(client: HealthConnectClient): String = try {
 class PrivacyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { Text("Aplikacja zapisuje wybór metryk i dzienne wartości na urządzeniu po przyznaniu zgód Health Connect. Po wybraniu wysyłki zapisuje wybrane wartości w Twoim arkuszu Google Sheets, korzystając z udzielonej zgody. Dane nie są przekazywane innym serwerom aplikacji.", modifier = Modifier.padding(24.dp)) } }
+        setContent { MaterialTheme { Text("Aplikacja odczytuje dane z Health Connect i zapisuje wybrane dzienne wartości na urządzeniu. Po wybraniu importu może zapisać do Health Connect wybrane dane z lokalnego archiwum Google Takeout. Wybrane wartości mogą być wysyłane do Twojego arkusza Google Sheets. Archiwum Takeout nie jest wysyłane na serwer aplikacji.", modifier = Modifier.padding(24.dp)) } }
     }
 }

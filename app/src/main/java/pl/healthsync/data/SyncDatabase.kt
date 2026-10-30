@@ -53,6 +53,26 @@ abstract class ImportDao {
     @Query("DELETE FROM ImportCheckpoint WHERE metricId = :metricId AND rangeStart = :start AND rangeEndExclusive = :end")
     abstract suspend fun invalidate(metricId: String, start: String, end: String)
 
+    @Query("DELETE FROM DailyObservation WHERE metricId = :metricId AND date = :date")
+    protected abstract suspend fun deleteObservation(metricId: String, date: String)
+
+    @Query("DELETE FROM ImportCheckpoint WHERE metricId = :metricId AND rangeStart <= :date AND rangeEndExclusive > :date")
+    protected abstract suspend fun invalidateDate(metricId: String, date: String)
+
+    /** Only call after a successful authoritative read following explicit undo. */
+    @Transaction
+    open suspend fun reconcileAfterUndo(metricId: String, date: String, observation: DailyObservation?) {
+        LocalDate.parse(date)
+        require(metricId.isNotBlank())
+        require(observation == null || (observation.date == date && observation.metricId == metricId && observation.value.isFinite()))
+        invalidateDate(metricId, date)
+        if (observation == null) deleteObservation(metricId, date)
+        else {
+            saveObservations(listOf(observation))
+            markDirty(listOf(UploadQueue(date)))
+        }
+    }
+
     @Transaction
     open suspend fun invalidateRanges(metricIds: List<String>, ranges: List<Pair<String, String>>) {
         for (metric in metricIds) for ((start, end) in ranges) invalidate(metric, start, end)
