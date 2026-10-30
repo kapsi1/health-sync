@@ -73,7 +73,7 @@ Użytkownik potwierdził, że reinstalacja Google Health przywróciła historię
 
 ### A. Uzupełnianie Health Connect z Takeout przez Health Sync
 
-**Rozpoczęcie: najpierw zapytać użytkownika i uzyskać zgodę na implementację tej sekcji.**
+**Implementacja rozpoczęta za zgodą użytkownika.** Gotowe są podstawowe parsery CSV, analiza plików ZIP, walidacja sesji i faz oraz funkcje porównywania i identyfikacji rekordów. Nie są jeszcze podłączone do interfejsu ani Health Connect; import nie jest gotowy do użycia.
 
 - [ ] Osobny, jednorazowy proces importu w aplikacji mobilnej: systemowy wybieracz archiwum/plików, wybór typów i zakresu dat, analiza bez zapisu, podgląd liczby brakujących, istniejących, konfliktowych i nieobsługiwanych rekordów, następnie jawne uruchomienie zapisu.
 - [ ] Pierwszy zakres: sen, waga i tłuszcz. Kolejne standardowe typy wyłącznie po zdefiniowaniu mapowania. Odtwarzać źródłowe rekordy, nie fikcyjne pojedyncze pomiary z dziennych średnich lub sum. Brak obsługi danego typu ma być widoczny, nie pomijany po cichu.
