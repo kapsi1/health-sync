@@ -13,7 +13,12 @@ internal data class TakeoutArchive(
     val thirdPartySleepIds: Set<String>? = null,
     val heights: List<TakeoutMeasurement> = emptyList(),
     val restingHeartRates: List<TakeoutMeasurement> = emptyList(),
-)
+    private val exercisesFile: ByteArray? = null,
+    private val nightlyFiles: Map<String, ByteArray> = emptyMap(),
+) {
+    fun readExercises(): List<TakeoutExercise> = exercisesFile?.inputStream()?.reader(Charsets.UTF_8)?.use(::readTakeoutExercises) ?: emptyList()
+    fun readNightly(kind: NightlyKind): List<TakeoutNightly> = nightlyFiles[kind.name]?.inputStream()?.reader(Charsets.UTF_8)?.use { readTakeoutNightly(it, kind) } ?: emptyList()
+}
 
 internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
     val files = mutableMapOf<String, MutableList<ByteArray>>()
@@ -29,10 +34,14 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
             val type = when {
                 path.contains("/Health Fitness Data_GoogleData/") && name.matches(Regex("UserSleeps_[0-9-]+\\.csv")) -> "sleep"
                 path.contains("/Health Fitness Data_GoogleData/") && name.matches(Regex("UserSleepStages_[0-9-]+\\.csv")) -> "stages"
+                path.contains("/Health Fitness Data_GoogleData/") && name.matches(Regex("UserExercises_[0-9-]+\\.csv")) -> "exercise"
                 path.contains("/Health Fitness Data_GoogleData/") && name == "User3rdPartySleepAttributes.csv" -> "sleep_origins"
                 path.contains("/Physical Activity_GoogleData/Weight/") && name == "weight.csv" -> "weight"
                 path.contains("/Physical Activity_GoogleData/Height/") && name == "height.csv" -> "height"
                 path.contains("/Physical Activity_GoogleData/Daily Resting Heart Rate/") && name == "daily_resting_heart_rate.csv" -> "resting_heart_rate"
+                path.contains("/Physical Activity_GoogleData/Daily Heart Rate Variability/") && name == "daily_heart_rate_variability.csv" -> "HRV"
+                path.contains("/Physical Activity_GoogleData/Daily Respiratory Rate/") && name == "daily_respiratory_rate.csv" -> "BREATHING"
+                path.contains("/Physical Activity_GoogleData/Daily Sleep Temperature Derivations/") && name == "daily_sleep_temperature_derivations.csv" -> "SKIN_TEMPERATURE"
                 path.contains("/Physical Activity_GoogleData/Body Fat/") && name.matches(Regex("body_fat_[0-9-]+\\.csv")) -> "fat"
                 else -> null
             }
@@ -54,7 +63,7 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
             zip.closeEntry()
         }
     }
-    require(files["sleep"].orEmpty().size <= 1 && files["stages"].orEmpty().size <= 1 && files["weight"].orEmpty().size <= 1 && files["height"].orEmpty().size <= 1 && files["sleep_origins"].orEmpty().size <= 1 && files["resting_heart_rate"].orEmpty().size <= 1) {
+    require(files["sleep"].orEmpty().size <= 1 && files["stages"].orEmpty().size <= 1 && files["weight"].orEmpty().size <= 1 && files["height"].orEmpty().size <= 1 && files["sleep_origins"].orEmpty().size <= 1 && files["resting_heart_rate"].orEmpty().size <= 1 && files["exercise"].orEmpty().size <= 1) {
         "W archiwum znaleziono wiele plików tego samego typu; nie można ich jednoznacznie połączyć"
     }
     require(files.containsKey("sleep") == files.containsKey("stages")) { "Do analizy snu potrzebne są pliki sesji i faz" }
@@ -71,5 +80,6 @@ internal fun readTakeoutArchive(input: InputStream): TakeoutArchive {
             row.getValue("sleep_id").also { require(it.isNotBlank()) { "Brak identyfikatora zewnętrznej sesji snu" } }
         }.toSet()
     }
-    return TakeoutArchive(weight, fat, sleeps, files.keys, thirdPartyIds, height, resting)
+    val nightly = NightlyKind.entries.mapNotNull { kind -> files[kind.name]?.let { require(it.size == 1) { "Wiele plików podsumowania nocnego" }; kind.name to it.single() } }.toMap()
+    return TakeoutArchive(weight, fat, sleeps, files.keys, thirdPartyIds, height, resting, files["exercise"]?.single(), nightly)
 }

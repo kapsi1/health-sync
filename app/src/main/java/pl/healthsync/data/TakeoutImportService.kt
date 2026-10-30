@@ -9,6 +9,10 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.HeightRecord
 import androidx.health.connect.client.records.RestingHeartRateRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.RespiratoryRateRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
@@ -30,6 +34,10 @@ internal fun takeoutWritePermissions(types: Set<TakeoutType>): Set<String> = bui
     if (TakeoutType.FAT in types) add(HealthPermission.getWritePermission(BodyFatRecord::class))
     if (TakeoutType.HEIGHT in types) add(HealthPermission.getWritePermission(HeightRecord::class))
     if (TakeoutType.RESTING_HEART_RATE in types) add(HealthPermission.getWritePermission(RestingHeartRateRecord::class))
+    if (TakeoutType.EXERCISE in types) add(HealthPermission.getWritePermission(ExerciseSessionRecord::class))
+    if (TakeoutType.HRV in types) add(HealthPermission.getWritePermission(HeartRateVariabilityRmssdRecord::class))
+    if (TakeoutType.BREATHING in types) add(HealthPermission.getWritePermission(RespiratoryRateRecord::class))
+    if (TakeoutType.SKIN_TEMPERATURE in types) add(HealthPermission.getWritePermission(SkinTemperatureRecord::class))
 }
 
 internal val takeoutSessionLock = Mutex()

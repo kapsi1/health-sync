@@ -141,6 +141,8 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
             }
         }
         if (TakeoutType.RESTING_HEART_RATE in types) Text("Tętno spoczynkowe to podsumowanie dzienne z Takeout. Connect przyjmuje całe uderzenia na minutę, dlatego wartość zostanie zaokrąglona. Dzień z dowolnym wpisem tego rodzaju w Connect zostanie pominięty.", style = MaterialTheme.typography.bodySmall)
+        if (TakeoutType.EXERCISE in types) Text("Dla nakładających się spacerów z opaski i wykrytych automatycznie wybierany jest wpis opaski. Inne nakładające się treningi są pomijane do sprawdzenia. Import obejmuje sesje i typ treningu, bez trasy i szczegółowych pomiarów.", style = MaterialTheme.typography.bodySmall)
+        if (types.any { it in setOf(TakeoutType.HRV, TakeoutType.BREATHING, TakeoutType.SKIN_TEMPERATURE) }) Text("Importowane są dzienne podsumowania Health dla głównego snu, a nie szczegółowe próbki. Czas wpisu odtwarzany jest z sesji snu v2; może różnić się od czasu w Health. Dni z wpisem w Connect są pomijane.", style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { datePicker(start) { start = it } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Od ${start.format(dateFormat)}") }
             OutlinedButton(onClick = { datePicker(end) { end = it } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Do ${end.format(dateFormat)}") }
@@ -240,7 +242,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
         Text("Wynik porównania", style = MaterialTheme.typography.titleMedium)
         result.counts.forEach { (type, counts) ->
             fun count(decision: ImportDecision) = counts[decision] ?: 0
-            val replaced = if (type == TakeoutType.SLEEP) ", pominiętych wersji v1 ${count(ImportDecision.SUPERSEDED)}" else ""
+            val replaced = if (type == TakeoutType.SLEEP) ", pominiętych wersji v1 ${count(ImportDecision.SUPERSEDED)}" else if (type == TakeoutType.EXERCISE) ", pominiętych automatycznych spacerów ${count(ImportDecision.SUPERSEDED)}" else ""
             Text("${type.label}: kandydatów do importu ${count(ImportDecision.INSERT)}, istniejących ${count(ImportDecision.ALREADY_PRESENT)}, konfliktów ${count(ImportDecision.CONFLICT)}, z Connect ${count(ImportDecision.ORIGINATES_IN_CONNECT)}, nieznane źródło ${count(ImportDecision.UNKNOWN_SOURCE)}$replaced.", style = MaterialTheme.typography.bodySmall)
         }
         if (result.sleepConflicts.isNotEmpty()) {

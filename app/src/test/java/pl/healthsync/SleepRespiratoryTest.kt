@@ -36,4 +36,22 @@ class SleepRespiratoryTest {
         val ambiguous = samples + BreathingSample(time("2026-06-12T08:00:00Z"), 15.0, "com.fitbit.FitbitMobile")
         assertTrue(breathingDuringSleep(sessions, ambiguous, zone).isEmpty())
     }
+    @Test fun `dense Fitbit HRV across midnight needs sleep and uses asleep phases`() {
+        val samples = listOf(BreathingSample(time("2026-06-11T21:55:00Z"), 10.0, "com.fitbit.FitbitMobile"),
+            BreathingSample(time("2026-06-11T22:05:00Z"), 20.0, "com.fitbit.FitbitMobile"),
+            BreathingSample(time("2026-06-12T05:00:00Z"), 40.0, "com.fitbit.FitbitMobile"))
+        val sessions = listOf(SleepBreathingSession(time("2026-06-12T06:00:00Z"), listOf(
+            SleepBreathingInterval(time("2026-06-11T21:50:00Z"), time("2026-06-12T06:00:00Z")))))
+        val result = hrvDuringSleep(sessions, samples, zone)
+        assertEquals(70.0 / 3.0, result.getValue(LocalDate.parse("2026-06-12")), 1e-9)
+        assertFalse(result.containsKey(LocalDate.parse("2026-06-11")))
+        assertTrue(hrvDuringSleep(emptyList(), samples, zone).isEmpty())
+    }
+    @Test fun `single Fitbit HRV and imported summary remain daily`() {
+        val samples = listOf(BreathingSample(time("2026-06-12T07:00:00Z"), 51.0, "com.fitbit.FitbitMobile"),
+            BreathingSample(time("2026-06-13T07:00:00Z"), 52.0, "pl.healthsync", true))
+        val result = hrvDuringSleep(emptyList(), samples, zone)
+        assertEquals(51.0, result.getValue(LocalDate.parse("2026-06-12")), 0.0)
+        assertEquals(52.0, result.getValue(LocalDate.parse("2026-06-13")), 0.0)
+    }
 }

@@ -10,11 +10,17 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.RespiratoryRateRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.units.Mass
 import androidx.health.connect.client.units.Percentage
 import androidx.health.connect.client.units.Length
 import androidx.health.connect.client.units.Energy
+import androidx.health.connect.client.units.Temperature
+import androidx.health.connect.client.units.TemperatureDelta
 import pl.healthsync.domain.*
 import java.time.LocalDate
 import java.time.ZoneId
@@ -58,6 +64,24 @@ internal fun mapTakeoutMeasurement(row: TakeoutMeasurement, accountKey: String):
 internal fun mapTakeoutSelection(selection: TakeoutSelection, accountKey: String): TakeoutPlannedRecord = when (selection) {
     is TakeoutSelection.Measurement -> TakeoutPlannedRecord(mapTakeoutMeasurement(selection.row, accountKey))
     is TakeoutSelection.Sleep -> TakeoutPlannedRecord(mapTakeoutSleep(selection.row, accountKey), selection.sourceStart, selection.sourceEnd)
+    is TakeoutSelection.Exercise -> mapTakeoutExercise(selection.row, accountKey)
+    is TakeoutSelection.Nightly -> mapTakeoutNightly(selection.row, selection.sleep, accountKey)
+}
+
+/** The timestamp or interval denotes the related sleep, not a raw measurement time. */
+internal fun mapTakeoutNightly(row: TakeoutNightly, sleep: TakeoutSleep, accountKey: String): TakeoutPlannedRecord {
+    val value = requireNotNull(row.value)
+    require(value.isFinite())
+    val key = when (row.kind) { NightlyKind.HRV -> "night_hrv"; NightlyKind.BREATHING -> "night_breathing"; NightlyKind.SKIN_TEMPERATURE -> "night_skin" }
+    val metadata = Metadata.unknownRecordingMethod(clientRecordId = takeoutClientId(key, accountKey, row.day.toString()), clientRecordVersion = 0)
+    val record: Record = when (row.kind) {
+        NightlyKind.HRV -> HeartRateVariabilityRmssdRecord(time = sleep.end, zoneOffset = sleep.endOffset, heartRateVariabilityMillis = value, metadata = metadata)
+        NightlyKind.BREATHING -> RespiratoryRateRecord(time = sleep.end, zoneOffset = sleep.endOffset, rate = value, metadata = metadata)
+        NightlyKind.SKIN_TEMPERATURE -> SkinTemperatureRecord(startTime = sleep.start, endTime = sleep.end, startZoneOffset = sleep.startOffset, endZoneOffset = sleep.endOffset,
+            baseline = Temperature.celsius(requireNotNull(row.baseline)), measurementLocation = SkinTemperatureRecord.MEASUREMENT_LOCATION_WRIST,
+            deltas = listOf(SkinTemperatureRecord.Delta(sleep.start, TemperatureDelta.celsius(value))), metadata = metadata)
+    }
+    return TakeoutPlannedRecord(record)
 }
 
 /** One estimated interval for the local calendar day, never an invented point measurement. */
@@ -83,4 +107,28 @@ internal fun mapTakeoutActivity(kind: TakeoutActivityKind, date: LocalDate, valu
         TakeoutActivityKind.ACTIVE_CALORIES -> ActiveCaloriesBurnedRecord(startTime = start.toInstant(), startZoneOffset = start.offset, endTime = end.toInstant(), endZoneOffset = end.offset, energy = Energy.kilocalories(value), metadata = metadata)
     }
     return TakeoutPlannedRecord(record)
+}
+
+/** An unknown activity or unsupported source details must be reviewed rather than guessed. */
+internal fun takeoutExerciseType(name: String): Int? = when (name) {
+    "Outdoor Walk" -> ExerciseSessionRecord.EXERCISE_TYPE_WALKING
+    "Weightlifting" -> ExerciseSessionRecord.EXERCISE_TYPE_WEIGHTLIFTING
+    "Weights" -> ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING
+    "Treadmill Run" -> ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL
+    "Bike", "Outdoor Bike" -> ExerciseSessionRecord.EXERCISE_TYPE_BIKING
+    "Spinning" -> ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY
+    "Dancing" -> ExerciseSessionRecord.EXERCISE_TYPE_DANCING
+    "Aerobics", "Aerobic Workout" -> ExerciseSessionRecord.EXERCISE_TYPE_EXERCISE_CLASS
+    "Elliptical" -> ExerciseSessionRecord.EXERCISE_TYPE_ELLIPTICAL
+    "Rollerblading" -> ExerciseSessionRecord.EXERCISE_TYPE_SKATING
+    "Sport" -> ExerciseSessionRecord.EXERCISE_TYPE_OTHER_WORKOUT
+    else -> null
+}
+
+internal fun mapTakeoutExercise(row: TakeoutExercise, accountKey: String): TakeoutPlannedRecord {
+    require(row.logType in setOf("TRACKER", "AUTO_DETECTED", "MANUAL") && row.deletionReason == "UNSPECIFIED" && !row.unsupportedDetails) { "Nie można bezpiecznie odtworzyć tego treningu" }
+    val type = requireNotNull(takeoutExerciseType(row.activity)) { "Nieznany typ treningu" }
+    val metadata = Metadata.unknownRecordingMethod(clientRecordId = takeoutClientId("exercise", accountKey, row.id), clientRecordVersion = row.lastUpdated.toEpochMilli().coerceAtLeast(0))
+    return TakeoutPlannedRecord(ExerciseSessionRecord(startTime = row.start, startZoneOffset = row.offset, endTime = row.end,
+        endZoneOffset = row.offset, exerciseType = type, title = row.activity, metadata = metadata))
 }

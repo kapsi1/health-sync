@@ -9,6 +9,10 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.HeightRecord
 import androidx.health.connect.client.records.RestingHeartRateRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.RespiratoryRateRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import pl.healthsync.domain.*
@@ -16,11 +20,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.reflect.KClass
 
-internal enum class TakeoutType(val label: String) { SLEEP("Sen"), WEIGHT("Waga"), FAT("Tkanka tłuszczowa"), HEIGHT("Wzrost"), RESTING_HEART_RATE("Tętno spoczynkowe") }
+internal enum class TakeoutType(val label: String) { SLEEP("Sen"), WEIGHT("Waga"), FAT("Tkanka tłuszczowa"), HEIGHT("Wzrost"), RESTING_HEART_RATE("Tętno spoczynkowe"), EXERCISE("Treningi"), HRV("HRV podczas snu"), BREATHING("Oddechy/min podczas snu"), SKIN_TEMPERATURE("Wahania temperatury skóry") }
 internal data class SleepPreviewEntry(val session: TakeoutSleep, val connect: SleepComparison)
 internal sealed interface TakeoutSelection {
     data class Measurement(val row: TakeoutMeasurement) : TakeoutSelection
     data class Sleep(val row: TakeoutSleep, val sourceStart: java.time.Instant, val sourceEnd: java.time.Instant) : TakeoutSelection
+    data class Exercise(val row: TakeoutExercise) : TakeoutSelection
+    data class Nightly(val row: TakeoutNightly, val sleep: TakeoutSleep) : TakeoutSelection
 }
 internal data class TakeoutPreview(val counts: Map<TakeoutType, Map<ImportDecision, Int>>, val sleepConflicts: Map<SleepConflictReason, Int> = emptyMap(), val sleepConnectComparison: Map<ImportDecision, Int> = emptyMap(), val sleepOverlapGroups: List<List<SleepPreviewEntry>> = emptyList(), val candidates: List<TakeoutSelection> = emptyList())
 
@@ -30,6 +36,10 @@ internal fun takeoutReadPermissions(types: Set<TakeoutType>): Set<String> = buil
     if (TakeoutType.FAT in types) add(HealthPermission.getReadPermission(BodyFatRecord::class))
     if (TakeoutType.HEIGHT in types) add(HealthPermission.getReadPermission(HeightRecord::class))
     if (TakeoutType.RESTING_HEART_RATE in types) add(HealthPermission.getReadPermission(RestingHeartRateRecord::class))
+    if (TakeoutType.EXERCISE in types) add(HealthPermission.getReadPermission(ExerciseSessionRecord::class))
+    if (TakeoutType.HRV in types) { add(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)); add(HealthPermission.getReadPermission(SleepSessionRecord::class)) }
+    if (TakeoutType.BREATHING in types) { add(HealthPermission.getReadPermission(RespiratoryRateRecord::class)); add(HealthPermission.getReadPermission(SleepSessionRecord::class)) }
+    if (TakeoutType.SKIN_TEMPERATURE in types) add(HealthPermission.getReadPermission(SkinTemperatureRecord::class))
     // Sleep sessions may start before the requested period, so the comparison needs all history.
     add(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)
 }
@@ -46,6 +56,10 @@ internal class TakeoutInspector(private val client: HealthConnectClient) {
             TakeoutType.FAT -> "fat" in archive.foundTypes
             TakeoutType.HEIGHT -> "height" in archive.foundTypes
             TakeoutType.RESTING_HEART_RATE -> "resting_heart_rate" in archive.foundTypes
+            TakeoutType.EXERCISE -> "exercise" in archive.foundTypes
+            TakeoutType.HRV -> "HRV" in archive.foundTypes && "sleep" in archive.foundTypes
+            TakeoutType.BREATHING -> "BREATHING" in archive.foundTypes && "sleep" in archive.foundTypes
+            TakeoutType.SKIN_TEMPERATURE -> "SKIN_TEMPERATURE" in archive.foundTypes && "sleep" in archive.foundTypes
         } }
         require(missingFiles.isEmpty()) { "Brak plików w archiwum dla: ${missingFiles.joinToString { it.label }}." }
         check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) {
@@ -113,6 +127,49 @@ internal class TakeoutInspector(private val client: HealthConnectClient) {
             sleepConnectComparison = source.map { candidate -> compareSleep(candidate, existing).decision }.groupingBy { it }.eachCount()
             counts[TakeoutType.SLEEP] = comparisons.groupingBy { it.decision }.eachCount()
             sleepConflicts = comparisons.mapNotNull { it.reason }.groupingBy { it }.eachCount()
+        }
+        if (TakeoutType.EXERCISE in types) {
+            val all = archive.readExercises()
+            val source = all.filter { it.start >= from && it.start < until }
+            val decisions = selectedTakeoutExercises(all)
+            val existing = if (source.isEmpty()) emptyList() else readAll(ExerciseSessionRecord::class, TimeRangeFilter.after(java.time.Instant.parse("1900-01-01T00:00:00Z")))
+            val compared = source.map { row ->
+                val overlaps = existing.filter { it.startTime < row.end && row.start < it.endTime }
+                val decision = when {
+                    decisions.getValue(row.id) != ImportDecision.INSERT -> decisions.getValue(row.id)
+                    row.unsupportedDetails || row.deletionReason != "UNSPECIFIED" || row.logType !in setOf("TRACKER", "AUTO_DETECTED", "MANUAL") || takeoutExerciseType(row.activity) == null -> ImportDecision.CONFLICT
+                    overlaps.isEmpty() -> ImportDecision.INSERT
+                    overlaps.size == 1 && overlaps.single().startTime == row.start && overlaps.single().endTime == row.end && overlaps.single().exerciseType == takeoutExerciseType(row.activity) -> ImportDecision.ALREADY_PRESENT
+                    else -> ImportDecision.CONFLICT
+                }
+                row to decision
+            }
+            counts[TakeoutType.EXERCISE] = compared.map { it.second }.groupingBy { it }.eachCount()
+            candidates.addAll(compared.filter { it.second == ImportDecision.INSERT }.map { TakeoutSelection.Exercise(it.first) })
+        }
+        for ((type, kind) in listOf(TakeoutType.HRV to NightlyKind.HRV, TakeoutType.BREATHING to NightlyKind.BREATHING, TakeoutType.SKIN_TEMPERATURE to NightlyKind.SKIN_TEMPERATURE)) {
+            if (type !in types) continue
+            if (kind == NightlyKind.SKIN_TEMPERATURE) check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_SKIN_TEMPERATURE) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) { "Health Connect nie obsługuje temperatury skóry" }
+            val source = archive.readNightly(kind).filter { it.day in start..end }
+            val days = source.groupingBy { it.day }.eachCount()
+            val filter = TimeRangeFilter.after(java.time.Instant.parse("1900-01-01T00:00:00Z"))
+            val existingDays: Set<LocalDate> = when (kind) {
+                NightlyKind.HRV -> readAll(HeartRateVariabilityRmssdRecord::class, filter).map { it.time.atZone(zone).toLocalDate() }.toSet()
+                NightlyKind.BREATHING -> readAll(RespiratoryRateRecord::class, filter).map { it.time.atZone(zone).toLocalDate() }.toSet()
+                NightlyKind.SKIN_TEMPERATURE -> readAll(SkinTemperatureRecord::class, filter).map { it.endTime.atZone(zone).toLocalDate() }.toSet()
+            }
+            val compared = source.map { row ->
+                val sleep = nightlySleepForDay(row.day, archive.sleeps, archive.thirdPartySleepIds, zone)
+                val decision = when {
+                    row.day in existingDays -> ImportDecision.ALREADY_PRESENT
+                    days.getValue(row.day) != 1 || sleep == null || row.value == null -> ImportDecision.CONFLICT
+                    runCatching { mapTakeoutNightly(row, sleep, "validation") }.isFailure -> ImportDecision.CONFLICT
+                    else -> ImportDecision.INSERT
+                }
+                if (decision == ImportDecision.INSERT) candidates.add(TakeoutSelection.Nightly(row, requireNotNull(sleep)))
+                decision
+            }
+            counts[type] = compared.groupingBy { it }.eachCount()
         }
         return TakeoutPreview(counts, sleepConflicts, sleepConnectComparison, sleepOverlapGroups, candidates)
     }

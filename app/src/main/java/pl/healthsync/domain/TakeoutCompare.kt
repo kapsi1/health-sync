@@ -135,7 +135,7 @@ internal fun compareSleep(candidate: TakeoutSleep, existing: List<ExistingSleep>
 
 /** A deterministic ID does not contain a raw measurement or a source identifier. */
 internal fun takeoutClientId(kind: String, accountKey: String, sourceKey: String): String {
-    require(kind in setOf("sleep", "weight", "body_fat", "height", "resting_heart_rate", "steps", "distance", "total_calories", "active_calories") && accountKey.isNotBlank() && sourceKey.isNotBlank())
+    require(kind in setOf("sleep", "exercise", "weight", "body_fat", "height", "resting_heart_rate", "steps", "distance", "total_calories", "active_calories", "night_hrv", "night_breathing", "night_skin") && accountKey.isNotBlank() && sourceKey.isNotBlank())
     val digest = MessageDigest.getInstance("SHA-256")
     listOf("takeout-v1", kind, accountKey, sourceKey).forEach { field ->
         val bytes = field.toByteArray(Charsets.UTF_8)

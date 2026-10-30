@@ -9,6 +9,10 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.RespiratoryRateRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import pl.healthsync.domain.*
 import java.time.LocalDate
 import java.time.ZoneId
@@ -48,6 +52,22 @@ internal fun reconstructTakeoutPlan(archive: TakeoutArchive, start: LocalDate, e
             }
         }
     }
+    if (TakeoutType.EXERCISE in types) {
+        val rows = archive.readExercises()
+        val decisions = selectedTakeoutExercises(rows)
+        rows.filter { it.start >= from && it.start < until && decisions[it.id] == ImportDecision.INSERT && !it.unsupportedDetails && it.deletionReason == "UNSPECIFIED" && it.logType in setOf("TRACKER", "AUTO_DETECTED", "MANUAL") && takeoutExerciseType(it.activity) != null }.forEach {
+            output.add(mapTakeoutExercise(it, accountKey))
+        }
+    }
+    for ((type, kind) in listOf(TakeoutType.HRV to NightlyKind.HRV, TakeoutType.BREATHING to NightlyKind.BREATHING, TakeoutType.SKIN_TEMPERATURE to NightlyKind.SKIN_TEMPERATURE)) {
+        if (type !in types) continue
+        val rows = archive.readNightly(kind).filter { it.day in start..end }
+        val counts = rows.groupingBy { it.day }.eachCount()
+        rows.filter { counts[it.day] == 1 && it.value != null }.forEach { row ->
+            val sleep = nightlySleepForDay(row.day, archive.sleeps, archive.thirdPartySleepIds, zone)
+            if (sleep != null) runCatching { mapTakeoutNightly(row, sleep, accountKey) }.getOrNull()?.let(output::add)
+        }
+    }
     return output
 }
 
@@ -83,6 +103,15 @@ internal fun affectedTakeoutDates(plan: List<TakeoutPlannedRecord>): Map<String,
             is DistanceRecord -> result.getOrPut("distance") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
             is TotalCaloriesBurnedRecord -> result.getOrPut("total_calories") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
             is ActiveCaloriesBurnedRecord -> result.getOrPut("active_calories") { mutableSetOf() }.add(record.startTime.atZone(zone).toLocalDate())
+            is ExerciseSessionRecord -> {
+                var day = record.startTime.atZone(zone).toLocalDate()
+                val last = record.endTime.minusNanos(1).atZone(zone).toLocalDate()
+                require(java.time.temporal.ChronoUnit.DAYS.between(day, last) <= 366) { "Zbyt długi trening" }
+                while (day <= last) { result.getOrPut("exercise_duration") { mutableSetOf() }.add(day); day = day.plusDays(1) }
+            }
+            is HeartRateVariabilityRmssdRecord -> result.getOrPut("hrv_rmssd") { mutableSetOf() }.add(record.time.atZone(zone).toLocalDate())
+            is RespiratoryRateRecord -> result.getOrPut("respiratory_rate_sleep") { mutableSetOf() }.add(record.time.atZone(zone).toLocalDate())
+            is SkinTemperatureRecord -> result.getOrPut("skin_temperature_delta") { mutableSetOf() }.add(record.endTime.atZone(zone).toLocalDate())
         }
     }
     return result

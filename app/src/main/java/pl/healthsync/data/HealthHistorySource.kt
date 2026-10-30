@@ -22,6 +22,7 @@ import pl.healthsync.domain.SleepBreathingInterval
 import pl.healthsync.domain.SleepBreathingSession
 import pl.healthsync.domain.BreathingSample
 import pl.healthsync.domain.breathingDuringSleep
+import pl.healthsync.domain.hrvDuringSleep
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneId
@@ -34,7 +35,7 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
         val metric = MetricRegistry.all.single { it.id == metricId }
         val granted = client.permissionController.getGrantedPermissions()
         check(granted.containsAll(pl.healthsync.requiredMetricPermissions(metric))) { "Brak zgody na odczyt: ${metric.label}" }
-        val earliestRead = if (metricId in sleepMetricIds || metricId == "respiratory_rate_sleep") range.start.minusDays(7) else range.start
+        val earliestRead = if (metricId in sleepMetricIds || metricId in setOf("respiratory_rate_sleep", "hrv_rmssd", "skin_temperature_delta")) range.start.minusDays(7) else range.start
         if (earliestRead < LocalDate.now(zone).minusDays(28)) {
             check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE &&
                 HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY in granted) { "Brak dostępu do starszej historii" }
@@ -43,21 +44,47 @@ class HealthHistorySource(private val client: HealthConnectClient) : HistorySour
             "body_fat" -> {
                 average(BodyFatRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.percentage.value) }
             }
-            "hrv_rmssd" -> average(HeartRateVariabilityRmssdRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.heartRateVariabilityMillis) }
+            "hrv_rmssd" -> {
+                val sessions = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive)
+                    .filter { it.endTime.atZone(zone).toLocalDate() in range.start..<range.endExclusive }
+                    .groupBy { it.endTime.atZone(zone).toLocalDate() }
+                    .mapNotNull { (_, rows) ->
+                        val candidates = rows.map { row ->
+                            val phases = row.stages.filter { it.stage in setOf(SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT, SleepSessionRecord.STAGE_TYPE_DEEP, SleepSessionRecord.STAGE_TYPE_REM) }
+                            val duration = phases.sumOf { java.time.Duration.between(it.startTime, it.endTime).toMillis() }
+                            Triple(row, phases, duration)
+                        }.filter { it.third > 3 * 60 * 60 * 1000L }.sortedByDescending { it.third }
+                        val top = candidates.firstOrNull()
+                        if (top == null || candidates.getOrNull(1)?.third == top.third) null else SleepBreathingSession(top.first.endTime, top.second.map { SleepBreathingInterval(it.startTime, it.endTime) })
+                    }
+                val samples = readAll(HeartRateVariabilityRmssdRecord::class, range.start.minusDays(7), range.endExclusive).map {
+                    BreathingSample(it.time, it.heartRateVariabilityMillis, it.metadata.dataOrigin.packageName,
+                        it.metadata.dataOrigin.packageName == "pl.healthsync" && it.metadata.clientRecordId?.startsWith("takeout-v1-") == true)
+                }
+                hrvDuringSleep(sessions, samples, zone).filterKeys { it >= range.start && it < range.endExclusive }.map { (date, value) -> ImportedValue(date, value) }
+            }
             "oxygen_saturation" -> average(OxygenSaturationRecord::class, range) { BodyFatSample(it.time, it.metadata.id, it.percentage.value) }
             "respiratory_rate_sleep" -> {
                 val sessions = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive).filter { it.endTime.atZone(zone).toLocalDate() in range.start..<range.endExclusive }
                 val sleeps = sessions.map { row -> SleepBreathingSession(row.endTime, row.stages.filter { it.stage in setOf(
                     SleepSessionRecord.STAGE_TYPE_SLEEPING, SleepSessionRecord.STAGE_TYPE_LIGHT, SleepSessionRecord.STAGE_TYPE_DEEP, SleepSessionRecord.STAGE_TYPE_REM
                 ) }.map { SleepBreathingInterval(it.startTime, it.endTime) }) }
-                val samples = readAll(RespiratoryRateRecord::class, range.start.minusDays(7), range.endExclusive).map { BreathingSample(it.time, it.rate, it.metadata.dataOrigin.packageName) }
+                val samples = readAll(RespiratoryRateRecord::class, range.start.minusDays(7), range.endExclusive).map { BreathingSample(it.time, it.rate, it.metadata.dataOrigin.packageName,
+                    it.metadata.dataOrigin.packageName == "pl.healthsync" && it.metadata.clientRecordId?.startsWith("takeout-v1-") == true) }
                 breathingDuringSleep(sleeps, samples, zone).filterKeys { it >= range.start && it < range.endExclusive }.map { (date, value) -> ImportedValue(date, value) }
             }
             "skin_temperature_delta" -> {
                 check(client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_SKIN_TEMPERATURE) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) { "Health Connect nie obsługuje temperatury skóry" }
-                client.aggregateGroupByPeriod(AggregateGroupByPeriodRequest(setOf(SkinTemperatureRecord.TEMPERATURE_DELTA_AVG),
-                    TimeRangeFilter.between(range.start.atStartOfDay(), range.endExclusive.atStartOfDay()), Period.ofDays(1)))
-                    .mapNotNull { row -> row.result[SkinTemperatureRecord.TEMPERATURE_DELTA_AVG]?.let { ImportedValue(row.startTime.toLocalDate(), it.inCelsius) } }
+                val rows = readAll(SkinTemperatureRecord::class, range.start.minusDays(7), range.endExclusive)
+                val summaries = rows.filter { (it.metadata.dataOrigin.packageName == "com.fitbit.FitbitMobile" ||
+                    (it.metadata.dataOrigin.packageName == "pl.healthsync" && it.metadata.clientRecordId?.startsWith("takeout-v1-") == true)) && it.deltas.size == 1 }
+                    .groupBy { it.endTime.atZone(zone).toLocalDate() }
+                val other = rows.filterNot { row -> summaries.values.any { row in it } }.flatMap { row -> row.deltas.map { it.time.atZone(zone).toLocalDate() to it.delta.inCelsius } }.groupBy({ it.first }, { it.second })
+                (summaries.keys + other.keys).filter { it >= range.start && it < range.endExclusive }.mapNotNull { day ->
+                    val daily = summaries[day]
+                    val value = if (daily != null) daily.singleOrNull()?.deltas?.singleOrNull()?.delta?.inCelsius else other[day]?.average()
+                    value?.let { ImportedValue(day, it) }
+                }
             }
             "sleep_duration", "sleep_awake" -> {
                 val rows = readAll(SleepSessionRecord::class, range.start.minusDays(7), range.endExclusive)

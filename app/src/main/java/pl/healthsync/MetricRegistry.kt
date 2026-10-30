@@ -51,5 +51,5 @@ object MetricRegistry {
 
 fun requiredMetricPermissions(metric: Metric): Set<String> = buildSet {
     add(metric.permission)
-    if (metric.id == "respiratory_rate_sleep") add(HealthPermission.getReadPermission(SleepSessionRecord::class))
+    if (metric.id in setOf("respiratory_rate_sleep", "hrv_rmssd")) add(HealthPermission.getReadPermission(SleepSessionRecord::class))
 }
