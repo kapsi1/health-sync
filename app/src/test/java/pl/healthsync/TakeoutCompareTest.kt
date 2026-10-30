@@ -74,4 +74,25 @@ class TakeoutCompareTest {
         val existing = ExistingSleep(at, at.plusSeconds(30))
         assertEquals(SleepConflictReason.ALTERNATIVE_IN_CONNECT, resolveSleepV2(listOf(v1, v2), listOf(existing)).getValue("v2").reason)
     }
+
+    @Test fun `non-overlapping v2 sessions can replace one longer v1`() {
+        fun session(id: String, start: Long, end: Long, version: String): TakeoutSleep {
+            val a = at.plusSeconds(start); val b = at.plusSeconds(end)
+            return TakeoutSleep(id, a, b, ZoneOffset.UTC, ZoneOffset.UTC, "DERIVED", at, (end - start) / 60,
+                listOf(TakeoutStage(id, a, b, "LIGHT")), version)
+        }
+        val v1 = session("v1", 0, 10800, "sleep_session_v1")
+        val early = session("early", 0, 1800, "sleep_session_v2")
+        val late = session("late", 3600, 7200, "sleep_session_v2")
+        val decisions = resolveSleepV2(listOf(v1, early, late), emptyList())
+        assertEquals(ImportDecision.SUPERSEDED, decisions.getValue("v1").decision)
+        assertEquals(ImportDecision.INSERT, decisions.getValue("early").decision)
+        assertEquals(ImportDecision.INSERT, decisions.getValue("late").decision)
+        val existingEarly = ExistingSleep(early.start, early.end, listOf(ExistingSleepStage(early.start, early.end, "LIGHT")))
+        val resumed = resolveSleepV2(listOf(v1, early, late), listOf(existingEarly))
+        assertEquals(ImportDecision.ALREADY_PRESENT, resumed.getValue("early").decision)
+        assertEquals(ImportDecision.INSERT, resumed.getValue("late").decision)
+        val foreign = ExistingSleep(at.plusSeconds(2400), at.plusSeconds(3000))
+        assertEquals(ImportDecision.CONFLICT, resolveSleepV2(listOf(v1, early, late), listOf(foreign)).getValue("late").decision)
+    }
 }

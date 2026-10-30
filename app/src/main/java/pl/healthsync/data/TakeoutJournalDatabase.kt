@@ -87,6 +87,9 @@ internal abstract class TakeoutJournalDao {
     @Query("SELECT * FROM TakeoutImportRecord WHERE sessionId = :sessionId AND clientRecordId = :clientId")
     abstract suspend fun record(sessionId: String, clientId: String): TakeoutImportRecord?
 
+    @Query("SELECT * FROM TakeoutImportRecord WHERE sessionId = :sessionId AND clientRecordId IN (:clientIds)")
+    abstract suspend fun recordsFor(sessionId: String, clientIds: List<String>): List<TakeoutImportRecord>
+
     /** Freeze the entire reviewed plan and its exact archive identity before the first write. */
     @Transaction
     open suspend fun createPlan(session: TakeoutImportSession, plan: List<TakeoutWriteCandidate>) {
@@ -150,6 +153,15 @@ internal abstract class TakeoutJournalDao {
             }
         }
     }
+
+    @Transaction
+    open suspend fun confirmAll(sessionId: String, entries: List<Pair<TakeoutWriteCandidate, TakeoutWriteReceipt>>) {
+        for ((candidate, receipt) in entries) {
+            val row = record(sessionId, candidate.clientId)
+            check(row?.kind == candidate.kind && row.contentHash == candidate.contentHash)
+            confirm(sessionId, candidate.clientId, receipt.recordId, receipt.lastModified)
+        }
+    }
 }
 
 internal class RoomTakeoutWriteJournal(private val dao: TakeoutJournalDao) : TakeoutWriteJournal {
@@ -164,6 +176,22 @@ internal class RoomTakeoutWriteJournal(private val dao: TakeoutJournalDao) : Tak
     }
     override suspend fun confirm(sessionId: String, candidate: TakeoutWriteCandidate, receipt: TakeoutWriteReceipt) {
         dao.confirm(sessionId, candidate.clientId, receipt.recordId, receipt.lastModified)
+    }
+    override suspend fun prepareBatch(sessionId: String, candidates: List<TakeoutWriteCandidate>) {
+        if (candidates.isEmpty()) return
+        dao.prepare(sessionId, candidates.map { TakeoutImportRecord(sessionId, it.clientId, it.kind, "pending", it.contentHash) })
+    }
+    override suspend fun confirmedBatch(sessionId: String, candidates: List<TakeoutWriteCandidate>): Map<String, TakeoutWriteReceipt?> {
+        if (candidates.isEmpty()) return emptyMap()
+        val rows = dao.recordsFor(sessionId, candidates.map { it.clientId }).associateBy { it.clientRecordId }
+        return candidates.associate { candidate ->
+            val row = checkNotNull(rows[candidate.clientId])
+            check(row.kind == candidate.kind && row.contentHash == candidate.contentHash)
+            candidate.clientId to if (row.status == "confirmed") TakeoutWriteReceipt(checkNotNull(row.connectRecordId), checkNotNull(row.connectLastModified)) else null
+        }
+    }
+    override suspend fun confirmBatch(sessionId: String, entries: List<Pair<TakeoutWriteCandidate, TakeoutWriteReceipt>>) {
+        if (entries.isNotEmpty()) dao.confirmAll(sessionId, entries)
     }
 }
 

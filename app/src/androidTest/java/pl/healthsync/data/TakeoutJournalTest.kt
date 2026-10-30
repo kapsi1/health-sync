@@ -12,6 +12,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import pl.healthsync.domain.TakeoutWriteCandidate
+import pl.healthsync.domain.TakeoutWriteReceipt
 
 @RunWith(AndroidJUnit4::class)
 class TakeoutJournalTest {
@@ -86,6 +87,22 @@ class TakeoutJournalTest {
         dao.markReverted("run", "a", "id-a", "2026-02-01T00:00:00Z")
         dao.finishUndo("run")
         assertEquals("reverted", dao.session("run")?.status)
+    }
+
+    @Test fun batchJournalPreservesReceiptsAndRejectsChangedContent() = runTest {
+        val candidates = listOf(TakeoutWriteCandidate("a", "sleep", "hash-a"), TakeoutWriteCandidate("b", "weight", "hash-b"))
+        dao.createPlan(session, candidates)
+        val journal = RoomTakeoutWriteJournal(dao)
+        journal.prepareBatch("run", candidates)
+        assertTrue(journal.confirmedBatch("run", candidates).values.all { it == null })
+        val receipt = TakeoutWriteReceipt("connect-a", "2026-02-01T00:00:00Z")
+        journal.confirmBatch("run", listOf(candidates.first() to receipt))
+        assertEquals(receipt, journal.confirmedBatch("run", candidates)["a"])
+        try {
+            journal.confirmBatch("run", listOf(candidates[1].copy(contentHash = "changed") to receipt))
+            fail("Expected failure")
+        } catch (_: IllegalStateException) { }
+        assertNull(journal.confirmedBatch("run", candidates)["b"])
     }
 
     @Test fun migrationPreservesPendingRecord() = runTest {

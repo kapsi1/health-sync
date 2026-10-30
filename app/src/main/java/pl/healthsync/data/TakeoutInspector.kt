@@ -109,9 +109,10 @@ internal class TakeoutInspector(private val client: HealthConnectClient) {
 
     private fun compareMeasurements(source: List<TakeoutMeasurement>, existing: List<ExistingMeasurement>): List<Pair<TakeoutMeasurement, ImportDecision>> {
         val frequencies = source.filter { it.source == "Google Health App" }.groupingBy { it.time }.eachCount()
+        val existingByKey = existing.groupBy { it.kind to it.time }
         return source.map { row -> row to
             if (row.source == "Google Health App" && frequencies.getValue(row.time) > 1) ImportDecision.CONFLICT
-            else classifyMeasurement(row, existing)
+            else classifyMeasurement(row, existingByKey[row.kind to row.time].orEmpty())
         }
     }
 

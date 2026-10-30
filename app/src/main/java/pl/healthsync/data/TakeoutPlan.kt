@@ -27,12 +27,12 @@ internal fun reconstructTakeoutPlan(archive: TakeoutArchive, start: LocalDate, e
     if (TakeoutType.SLEEP in types && archive.thirdPartySleepIds != null) {
         val sources = archive.thirdPartySleepIds
         takeoutSleepGroups(archive.sleeps).forEach { group ->
-            val v2 = group.filter { it.algorithmVersion == "sleep_session_v2" }
-            val valid = (group.size == 1 && v2.size == 1) || (group.size == 2 && v2.size == 1 && group.any { it.algorithmVersion == "sleep_session_v1" })
-            if (valid && group.none { it.id in sources }) {
-                val row = v2.single()
+            val v2 = selectedSleepV2(group)
+            if (v2 != null && group.none { it.id in sources }) {
+                v2.forEach { row ->
                 if (row.end >= from && row.end < until && classifySleep(row, emptyList()) == ImportDecision.INSERT) {
                     output.add(mapTakeoutSelection(TakeoutSelection.Sleep(row, group.minOf { it.start }, group.maxOf { it.end }), accountKey))
+                }
                 }
             }
         }

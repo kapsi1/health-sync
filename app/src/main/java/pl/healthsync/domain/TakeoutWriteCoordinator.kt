@@ -17,6 +17,12 @@ internal interface TakeoutWriteJournal {
     suspend fun prepare(sessionId: String, candidate: TakeoutWriteCandidate)
     suspend fun confirmed(sessionId: String, candidate: TakeoutWriteCandidate): TakeoutWriteReceipt?
     suspend fun confirm(sessionId: String, candidate: TakeoutWriteCandidate, receipt: TakeoutWriteReceipt)
+    suspend fun prepareBatch(sessionId: String, candidates: List<TakeoutWriteCandidate>) { candidates.forEach { prepare(sessionId, it) } }
+    suspend fun confirmedBatch(sessionId: String, candidates: List<TakeoutWriteCandidate>): Map<String, TakeoutWriteReceipt?> =
+        candidates.associate { it.clientId to confirmed(sessionId, it) }
+    suspend fun confirmBatch(sessionId: String, entries: List<Pair<TakeoutWriteCandidate, TakeoutWriteReceipt>>) {
+        entries.forEach { (candidate, receipt) -> confirm(sessionId, candidate, receipt) }
+    }
 }
 
 internal interface TakeoutWriteGateway {

@@ -45,25 +45,33 @@ internal fun takeoutSleepGroups(sleeps: List<TakeoutSleep>): List<List<TakeoutSl
     return result
 }
 
-/** Prefer v2 only in an unambiguous v1/v2 pair or a standalone v2 session. */
+/** A single v1 can be replaced by one or more mutually non-overlapping v2 sessions. */
+internal fun selectedSleepV2(group: List<TakeoutSleep>): List<TakeoutSleep>? {
+    val v2 = group.filter { it.algorithmVersion == "sleep_session_v2" }.sortedBy { it.start }
+    if (v2.isEmpty() || group.any { it.algorithmVersion !in setOf("sleep_session_v1", "sleep_session_v2") } ||
+        group.count { it.algorithmVersion == "sleep_session_v1" } > 1 ||
+        v2.zipWithNext().any { (a, b) -> a.end > b.start }) return null
+    return v2
+}
+
 internal fun resolveSleepV2(sleeps: List<TakeoutSleep>, existing: List<ExistingSleep>, thirdPartyIds: Set<String>? = emptySet()): Map<String, SleepComparison> {
     val result = mutableMapOf<String, SleepComparison>()
     for (group in takeoutSleepGroups(sleeps)) {
-        val v2 = group.filter { it.algorithmVersion == "sleep_session_v2" }
-        val valid = (group.size == 1 && v2.size == 1) ||
-            (group.size == 2 && v2.size == 1 && group.any { it.algorithmVersion == "sleep_session_v1" })
-        if (!valid) {
+        val v2 = selectedSleepV2(group)
+        if (v2 == null) {
             group.forEach { result[it.id] = SleepComparison(ImportDecision.CONFLICT, SleepConflictReason.NO_UNIQUE_V2) }
             continue
         }
-        val selected = v2.single()
-        var comparison = if (thirdPartyIds == null || group.any { it.id in thirdPartyIds }) SleepComparison(ImportDecision.UNKNOWN_SOURCE)
-            else compareSleep(selected, existing)
-        if (comparison.decision == ImportDecision.INSERT && group.any { alternate ->
-                alternate.id != selected.id && existing.any { it.start < alternate.end && alternate.start < it.end }
-            }) comparison = SleepComparison(ImportDecision.CONFLICT, SleepConflictReason.ALTERNATIVE_IN_CONNECT)
-        result[selected.id] = comparison
-        group.filter { it.id != selected.id }.forEach { result[it.id] = SleepComparison(ImportDecision.SUPERSEDED) }
+        for (selected in v2) {
+            var comparison = if (thirdPartyIds == null || group.any { it.id in thirdPartyIds }) SleepComparison(ImportDecision.UNKNOWN_SOURCE)
+                else compareSleep(selected, existing)
+            val unrelated = existing.filterNot { row -> v2.any { compareSleep(it, listOf(row)).decision == ImportDecision.ALREADY_PRESENT } }
+            if (comparison.decision == ImportDecision.INSERT && group.filter { it.algorithmVersion == "sleep_session_v1" }.any { alternate ->
+                    unrelated.any { it.start < alternate.end && alternate.start < it.end }
+                }) comparison = SleepComparison(ImportDecision.CONFLICT, SleepConflictReason.ALTERNATIVE_IN_CONNECT)
+            result[selected.id] = comparison
+        }
+        group.filter { it.algorithmVersion == "sleep_session_v1" }.forEach { result[it.id] = SleepComparison(ImportDecision.SUPERSEDED) }
     }
     return result
 }

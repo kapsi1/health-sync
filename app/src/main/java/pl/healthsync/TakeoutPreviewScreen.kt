@@ -25,11 +25,19 @@ import pl.healthsync.data.takeoutWritePermissions
 import pl.healthsync.data.readVerifiedTakeout
 import pl.healthsync.data.TakeoutImportService
 import pl.healthsync.data.TakeoutJournalDatabase
+import pl.healthsync.data.TakeoutActivityInspector
+import pl.healthsync.data.ActivityPreviewDay
+import pl.healthsync.data.ActivityPreviewStatus
+import pl.healthsync.data.activityReadPermissions
 import pl.healthsync.domain.ImportDecision
 import pl.healthsync.domain.TakeoutArchive
+import pl.healthsync.domain.TakeoutActivityKind
+import pl.healthsync.domain.readTakeoutActivityArchive
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.text.NumberFormat
+import java.util.Locale
 
 /** Analysis is read-only; writing requires a separate explicit action. */
 @Composable
@@ -46,6 +54,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     var archiveDigest by remember { mutableStateOf<String?>(null) }
     var accountLabel by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<TakeoutPreview?>(null) }
+    var activityPreview by remember { mutableStateOf<Map<TakeoutActivityKind, List<ActivityPreviewDay>>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var progressDone by remember { mutableIntStateOf(0) }
@@ -60,7 +69,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     }
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) scope.launch {
-            busy = true; preview = null; archive = null; archiveUri = null; archiveDigest = null; message = ""
+            busy = true; preview = null; activityPreview = null; archive = null; archiveUri = null; archiveDigest = null; message = ""
             try {
                 val verified = withContext(Dispatchers.IO) { readVerifiedTakeout(context, uri) }
                 archive = verified.archive; archiveUri = uri; archiveDigest = verified.digest
@@ -72,7 +81,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
         }
     }
     fun datePicker(value: LocalDate, set: (LocalDate) -> Unit) {
-        DatePickerDialog(context, { _, year, month, day -> set(LocalDate.of(year, month + 1, day)); preview = null }, value.year, value.monthValue - 1, value.dayOfMonth).apply {
+        DatePickerDialog(context, { _, year, month, day -> set(LocalDate.of(year, month + 1, day)); preview = null; activityPreview = null }, value.year, value.monthValue - 1, value.dayOfMonth).apply {
             datePicker.minDate = LocalDate.of(1900, 1, 1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
             datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         }.show()
@@ -143,6 +152,25 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 } finally { busy = false }
             }
         }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Porównaj z Health Connect") }
+        OutlinedButton(onClick = {
+            scope.launch {
+                val kinds = TakeoutActivityKind.entries.toSet()
+                val missing = activityReadPermissions(kinds) - client.permissionController.getGrantedPermissions()
+                if (missing.isNotEmpty()) { permissionLauncher.launch(missing); return@launch }
+                busy = true; activityPreview = null; message = ""
+                try {
+                    val uri = requireNotNull(archiveUri)
+                    val estimates = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { readTakeoutActivityArchive(it, kinds, start, end, zone) }
+                            ?: error("Nie można otworzyć archiwum")
+                    }
+                    activityPreview = withContext(Dispatchers.IO) { TakeoutActivityInspector(client).inspect(estimates, start, end) }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    message = "Nie udało się przeanalizować aktywności: ${e.message ?: e.javaClass.simpleName}."
+                } finally { busy = false }
+            }
+        }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Analizuj aktywność (bez zapisu)") }
     }
     if (busy) {
         Text("Nie wychodź z aplikacji", style = MaterialTheme.typography.bodySmall)
@@ -154,6 +182,30 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
         }
     }
     if (message.isNotBlank()) Text(message, color = if (message.startsWith("Import zakończony") || message.startsWith("Import wznowiony") || message.startsWith("Wycofano") || message.startsWith("Zgody zaktualizowane")) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    activityPreview?.let { result ->
+        Text("Aktywność — analiza", style = MaterialTheme.typography.titleMedium)
+        Text("Wyniki są szacunkowe; priorytet: opaska, telefon, Health, Fit. Różne wpisy kalorii w tej samej minucie są sumowane. Wpisy z Connect są pomijane. Analiza niczego nie zapisuje.", style = MaterialTheme.typography.bodySmall)
+        if (result.isEmpty()) Text("Nie znaleziono danych aktywności w wybranym zakresie.", style = MaterialTheme.typography.bodySmall)
+        result.forEach { (kind, days) ->
+            val label = when (kind) { TakeoutActivityKind.STEPS -> "Kroki"; TakeoutActivityKind.DISTANCE -> "Dystans"; TakeoutActivityKind.TOTAL_CALORIES -> "Spalone kalorie"; TakeoutActivityKind.ACTIVE_CALORIES -> "Aktywne kalorie" }
+            Text("$label: szacunków ${days.count { it.status == ActivityPreviewStatus.ESTIMATED }}, dni obecnych w Connect ${days.count { it.status == ActivityPreviewStatus.PRESENT_IN_CONNECT }}, niejednoznacznych ${days.count { it.status == ActivityPreviewStatus.AMBIGUOUS }}.", style = MaterialTheme.typography.bodySmall)
+            var expanded by remember(result, kind) { mutableStateOf(false) }
+            TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Ukryj dni" else "Pokaż dni: $label") }
+            if (expanded) days.forEach { day ->
+                val details = when (day.status) {
+                    ActivityPreviewStatus.PRESENT_IN_CONNECT -> "Dane w Connect — pominięto"
+                    ActivityPreviewStatus.AMBIGUOUS -> "Pominięto: ${day.estimate.reason ?: "niejednoznaczne dane"}"
+                    ActivityPreviewStatus.ESTIMATED -> {
+                        val number = NumberFormat.getNumberInstance(Locale.forLanguageTag("pl-PL")).apply { maximumFractionDigits = if (kind == TakeoutActivityKind.DISTANCE) 3 else 0 }
+                        val unit = when (kind) { TakeoutActivityKind.STEPS -> "kroków"; TakeoutActivityKind.DISTANCE -> "km"; else -> "kcal" }
+                        val amount = requireNotNull(day.estimate.value) / if (kind == TakeoutActivityKind.DISTANCE) 1000.0 else 1.0
+                        "Szacunkowa suma: ${number.format(amount)} $unit"
+                    }
+                }
+                Text("${day.date.format(dateFormat)} · $details", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
     preview?.let { result ->
         Text("Wynik porównania", style = MaterialTheme.typography.titleMedium)
         result.counts.forEach { (type, counts) ->

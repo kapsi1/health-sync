@@ -14,7 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import pl.healthsync.domain.HistoryImport
-import pl.healthsync.domain.TakeoutWriteCoordinator
+import pl.healthsync.domain.TakeoutBatchWriteCoordinator
 import pl.healthsync.domain.TakeoutUndoCoordinator
 import pl.healthsync.sheetOperationLock
 import pl.healthsync.SyncJournal
@@ -105,8 +105,9 @@ internal class TakeoutImportService(private val context: Context, private val cl
         val runId = "takeout-${session.id}"
         journal.event(runId, "Takeout", "Rozpoczęto zapis do Health Connect: ${plan.size} rekordów.")
         try {
-        val coordinator = TakeoutWriteCoordinator(RoomTakeoutWriteJournal(dao), HealthConnectTakeoutGateway(client, context.packageName, plan))
-        coordinator.run(session.id, plan.map { takeoutPayloadCandidate(it.record) }, progress)
+        val coordinator = TakeoutBatchWriteCoordinator(RoomTakeoutWriteJournal(dao), HealthConnectTakeoutGateway(client, context.packageName, plan))
+        val ordered = plan.sortedWith(compareBy<TakeoutPlannedRecord>({ takeoutPayloadCandidate(it.record).kind }, { takeoutRecordTime(it.record) }))
+        coordinator.run(session.id, ordered.map { takeoutPayloadCandidate(it.record) }, batchSize = 10, progress = progress)
         // Re-read historical days through the standard path, then leave them in the normal upload queue.
         val importer = HistoryImport(HealthHistorySource(client), RoomHistoryStore(SyncDatabase.get(context).importDao()))
         affectedTakeoutDates(plan).forEach { (metric, dates) ->

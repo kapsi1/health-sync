@@ -29,4 +29,15 @@ class TakeoutPlanTest {
         val archive = TakeoutArchive(emptyList(), emptyList(), listOf(v2), setOf("sleep", "stages"), null)
         assertTrue(reconstructTakeoutPlan(archive, start, start, setOf(TakeoutType.SLEEP), "account").isEmpty())
     }
+
+    @Test fun `resume reconstructs both disjoint v2 sessions in one v1 group`() {
+        val lateStart = at.plusSeconds(7200)
+        val lateStage = TakeoutStage("late-stage", lateStart, lateStart.plusSeconds(3600), "LIGHT")
+        val late = v2.copy(id = "late", start = lateStart, end = lateStart.plusSeconds(3600), stages = listOf(lateStage))
+        val longV1 = v1.copy(end = late.end)
+        val archive = TakeoutArchive(emptyList(), emptyList(), listOf(longV1, v2, late), setOf("sleep", "stages", "sleep_origins"), emptySet())
+        val plan = reconstructTakeoutPlan(archive, start, start, setOf(TakeoutType.SLEEP), "account")
+        assertEquals(2, plan.size)
+        assertTrue(plan.all { it.sleepSourceStart == at && it.sleepSourceEnd == late.end })
+    }
 }
