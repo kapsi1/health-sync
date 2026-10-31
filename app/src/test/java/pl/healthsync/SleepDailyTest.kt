@@ -61,6 +61,12 @@ class SleepDailyTest {
         assertEquals(0L, result.awakeDuration!!.toMinutes())
     }
 
+    @Test fun `unspecified sleep does not imply zero awakenings`() {
+        val result = day(night(SleepState.ASLEEP_UNSPECIFIED to 480))
+        assertEquals(480L, result.duration!!.toMinutes())
+        assertNull(result.awakeDuration)
+    }
+
     @Test fun `sessions without stages do not become time in bed or zero wake`() {
         val result = day(SleepInterval(nightStart, nightStart.plusSeconds(8 * 3600)))
         assertNull(result.duration)

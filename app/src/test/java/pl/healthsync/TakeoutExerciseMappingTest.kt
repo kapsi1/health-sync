@@ -20,5 +20,11 @@ class TakeoutExerciseMappingTest {
         assertTrue(record.segments.isEmpty())
     }
     @Test(expected = IllegalArgumentException::class) fun `unknown activities cannot be guessed`() { mapTakeoutExercise(row.copy(activity = "unknown"), "account") }
+    @Test fun `Connect milliseconds are ignored but changed seconds are not`() {
+        val record = mapTakeoutExercise(row, "account").record as ExerciseSessionRecord
+        val fractional = ExerciseSessionRecord(startTime = record.startTime.plusMillis(25), endTime = record.endTime.plusMillis(900), startZoneOffset = record.startZoneOffset, endZoneOffset = record.endZoneOffset, exerciseType = record.exerciseType, metadata = record.metadata)
+        assertTrue(exerciseMatchesTakeout(row, fractional))
+        assertFalse(exerciseMatchesTakeout(row.copy(end = row.end.plusSeconds(1)), fractional))
+    }
     @Test(expected = IllegalArgumentException::class) fun `sessions with unsupported events cannot be silently reduced`() { mapTakeoutExercise(row.copy(unsupportedDetails = true), "account") }
 }

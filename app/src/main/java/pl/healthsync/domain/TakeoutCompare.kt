@@ -55,10 +55,14 @@ internal fun selectedSleepV2(group: List<TakeoutSleep>): List<TakeoutSleep>? {
     return v2
 }
 
+/** A lone v1 is usable when no competing session or v2 exists. */
+internal fun selectedSleepForImport(group: List<TakeoutSleep>): List<TakeoutSleep>? =
+    if (group.size == 1 && group.single().algorithmVersion == "sleep_session_v1") group else selectedSleepV2(group)
+
 internal fun resolveSleepV2(sleeps: List<TakeoutSleep>, existing: List<ExistingSleep>, thirdPartyIds: Set<String>? = emptySet()): Map<String, SleepComparison> {
     val result = mutableMapOf<String, SleepComparison>()
     for (group in takeoutSleepGroups(sleeps)) {
-        val v2 = selectedSleepV2(group)
+        val v2 = selectedSleepForImport(group)
         if (v2 == null) {
             group.forEach { result[it.id] = SleepComparison(ImportDecision.CONFLICT, SleepConflictReason.NO_UNIQUE_V2) }
             continue
@@ -72,7 +76,7 @@ internal fun resolveSleepV2(sleeps: List<TakeoutSleep>, existing: List<ExistingS
                 }) comparison = SleepComparison(ImportDecision.CONFLICT, SleepConflictReason.ALTERNATIVE_IN_CONNECT)
             result[selected.id] = comparison
         }
-        group.filter { it.algorithmVersion == "sleep_session_v1" }.forEach { result[it.id] = SleepComparison(ImportDecision.SUPERSEDED) }
+        group.filter { it.algorithmVersion == "sleep_session_v1" && it !in v2 }.forEach { result[it.id] = SleepComparison(ImportDecision.SUPERSEDED) }
     }
     return result
 }

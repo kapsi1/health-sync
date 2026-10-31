@@ -41,4 +41,14 @@ class TakeoutExerciseTest {
         assertEquals(ImportDecision.SUPERSEDED, selectedTakeoutExercises(listOf(tracker, automatic))["auto"])
         assertTrue(selectedTakeoutExercises(listOf(tracker, automatic.copy(activity = "Bike"))).values.all { it == ImportDecision.CONFLICT })
     }
+    @Test fun `one automatic session can overlap multiple separate tracker sessions`() {
+        val tracker = readTakeoutExercises(StringReader(header + row)).single()
+        val second = tracker.copy(id = "b", start = tracker.end.plusSeconds(60), end = tracker.end.plusSeconds(1800))
+        val auto = tracker.copy(id = "auto", start = tracker.start.minusSeconds(60), end = second.end.plusSeconds(60), logType = "AUTO_DETECTED")
+        val result = selectedTakeoutExercises(listOf(tracker, second, auto))
+        assertEquals(ImportDecision.INSERT, result["a"])
+        assertEquals(ImportDecision.INSERT, result["b"])
+        assertEquals(ImportDecision.SUPERSEDED, result["auto"])
+        assertTrue(selectedTakeoutExercises(listOf(tracker, second.copy(start = tracker.start), auto)).values.all { it == ImportDecision.CONFLICT })
+    }
 }

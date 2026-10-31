@@ -28,7 +28,7 @@ import kotlin.math.roundToLong
 
 /** Produces records only; callers must independently verify permissions, origin and conflicts. */
 internal fun mapTakeoutSleep(row: TakeoutSleep, accountKey: String): SleepSessionRecord {
-    require(row.algorithmVersion == "sleep_session_v2" && classifySleep(row, emptyList()) == ImportDecision.INSERT)
+    require(row.algorithmVersion in setOf("sleep_session_v1", "sleep_session_v2") && classifySleep(row, emptyList()) == ImportDecision.INSERT)
     val stages = row.stages.map { stage ->
         val kind = when (stage.type) {
             "AWAKE" -> SleepSessionRecord.STAGE_TYPE_AWAKE

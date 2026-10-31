@@ -72,7 +72,7 @@ class TakeoutCompareTest {
         assertEquals(ImportDecision.INSERT, decisions.getValue("v2").decision)
         val ambiguous = resolveSleepV2(listOf(base, v2, v2.copy(id = "v2b")), emptyList())
         assertTrue(ambiguous.values.all { it.reason == SleepConflictReason.NO_UNIQUE_V2 })
-        assertEquals(SleepConflictReason.NO_UNIQUE_V2, resolveSleepV2(listOf(base), emptyList()).getValue("v1").reason)
+        assertEquals(ImportDecision.INSERT, resolveSleepV2(listOf(base), emptyList()).getValue("v1").decision)
         assertEquals(ImportDecision.UNKNOWN_SOURCE, resolveSleepV2(listOf(base, v2), emptyList(), null).getValue("v2").decision)
         assertEquals(ImportDecision.UNKNOWN_SOURCE, resolveSleepV2(listOf(base, v2), emptyList(), setOf("v1")).getValue("v2").decision)
     }

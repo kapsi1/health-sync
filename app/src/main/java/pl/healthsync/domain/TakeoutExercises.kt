@@ -53,13 +53,14 @@ internal fun overlappingExerciseGroups(rows: List<TakeoutExercise>): List<List<T
     return groups
 }
 
-/** Only the explicitly approved tracker/automatic walking pair is resolved automatically. */
+/** Prefer non-overlapping tracker sessions over overlapping automatic sessions of the same activity. */
 internal fun selectedTakeoutExercises(rows: List<TakeoutExercise>): Map<String, ImportDecision> = buildMap {
     overlappingExerciseGroups(rows).forEach { group ->
+        val trackers = group.filter { it.logType == "TRACKER" }.sortedBy { it.start }
         when {
             group.size == 1 -> put(group.single().id, ImportDecision.INSERT)
-            group.size == 2 && group.all { it.activity == "Outdoor Walk" } && group.map { it.logType }.toSet() == setOf("TRACKER", "AUTO_DETECTED") -> {
-                group.forEach { put(it.id, if (it.logType == "TRACKER") ImportDecision.INSERT else ImportDecision.SUPERSEDED) }
+            trackers.isNotEmpty() && group.map { it.activity }.distinct().size == 1 && group.all { it.logType in setOf("TRACKER", "AUTO_DETECTED") } && trackers.zipWithNext().all { (a, b) -> a.end <= b.start } -> {
+                group.forEach { row -> put(row.id, if (row.logType == "TRACKER") ImportDecision.INSERT else if (trackers.any { it.start < row.end && row.start < it.end }) ImportDecision.SUPERSEDED else ImportDecision.CONFLICT) }
             }
             else -> group.forEach { put(it.id, ImportDecision.CONFLICT) }
         }

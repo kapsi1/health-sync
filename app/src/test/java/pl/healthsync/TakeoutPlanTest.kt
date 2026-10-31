@@ -29,6 +29,13 @@ class TakeoutPlanTest {
         val archive = TakeoutArchive(emptyList(), emptyList(), listOf(v2), setOf("sleep", "stages"), null)
         assertTrue(reconstructTakeoutPlan(archive, start, start, setOf(TakeoutType.SLEEP), "account").isEmpty())
     }
+    @Test fun `single v1 is reconstructed for resume`() {
+        val archive = TakeoutArchive(emptyList(), emptyList(), listOf(v1), setOf("sleep", "stages", "sleep_origins"), emptySet())
+        val plan = reconstructTakeoutPlan(archive, start, start, setOf(TakeoutType.SLEEP), "account")
+        assertEquals(1, plan.size)
+        val record = takeoutPayloadCandidate(plan.single().record)
+        assertEquals(plan, matchRecordedTakeoutPlan(plan, listOf(TakeoutImportRecord("run", record.clientId, record.kind, "pending", record.contentHash))))
+    }
 
     @Test fun `resume reconstructs both disjoint v2 sessions in one v1 group`() {
         val lateStart = at.plusSeconds(7200)

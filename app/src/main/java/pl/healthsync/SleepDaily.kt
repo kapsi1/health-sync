@@ -5,7 +5,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-internal enum class SleepState { ASLEEP, AWAKE, UNKNOWN }
+internal enum class SleepState { ASLEEP, ASLEEP_UNSPECIFIED, AWAKE, UNKNOWN }
 internal data class SleepStageInterval(val start: Instant, val end: Instant, val state: SleepState)
 internal data class SleepInterval(val start: Instant, val end: Instant, val stages: List<SleepStageInterval> = emptyList())
 internal data class SleepDay(val duration: Duration?, val awakeDuration: Duration?, val overlapping: Boolean)
@@ -27,12 +27,12 @@ private fun sessionDurations(session: SleepInterval): SessionDurations {
     fun total(parts: List<SleepStageInterval>, state: SleepState): Duration =
         parts.filter { it.state == state }.fold(Duration.ZERO) { sum, stage -> sum.plus(Duration.between(stage.start, stage.end)) }
 
-    val asleep = if (complete(stages, session.start, session.end)) total(stages, SleepState.ASLEEP) else null
-    val firstSleep = stages.indexOfFirst { it.state == SleepState.ASLEEP }
-    val lastSleep = stages.indexOfLast { it.state == SleepState.ASLEEP }
+    val asleep = if (complete(stages, session.start, session.end)) total(stages, SleepState.ASLEEP).plus(total(stages, SleepState.ASLEEP_UNSPECIFIED)) else null
+    val firstSleep = stages.indexOfFirst { it.state in setOf(SleepState.ASLEEP, SleepState.ASLEEP_UNSPECIFIED) }
+    val lastSleep = stages.indexOfLast { it.state in setOf(SleepState.ASLEEP, SleepState.ASLEEP_UNSPECIFIED) }
     // Wake time before first sleep or after last sleep is not an awakening during sleep.
     val inside = if (firstSleep >= 0) stages.subList(firstSleep, lastSleep + 1) else emptyList()
-    val awake = if (inside.isNotEmpty() && complete(inside, inside.first().start, inside.last().end))
+    val awake = if (inside.isNotEmpty() && inside.none { it.state == SleepState.ASLEEP_UNSPECIFIED } && complete(inside, inside.first().start, inside.last().end))
         total(inside, SleepState.AWAKE) else null
     return SessionDurations(asleep, awake)
 }

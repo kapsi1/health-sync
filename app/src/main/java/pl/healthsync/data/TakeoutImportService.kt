@@ -54,7 +54,8 @@ internal class TakeoutImportService(private val context: Context, private val cl
         val key = takeoutAccountKey(accountLabel)
         val verified = readVerifiedTakeout(context, uri)
         check(verified.digest == originalDigest) { "Archiwum zmieniło się. Przeprowadź analizę ponownie." }
-        val now = TakeoutInspector(client).inspect(verified.archive, types, start, end)
+        val exclusions = context.getSharedPreferences("takeout_exclusions", Context.MODE_PRIVATE).getStringSet("exercise_ids", emptySet()).orEmpty()
+        val now = TakeoutInspector(client, exclusions).inspect(verified.archive, types, start, end)
         val reviewedPlan = reviewed.candidates.map { mapTakeoutSelection(it, key) }
         val currentPlan = now.candidates.map { mapTakeoutSelection(it, key) }
         val originalCandidates = reviewedPlan.map { takeoutPayloadCandidate(it.record) }.toSet()

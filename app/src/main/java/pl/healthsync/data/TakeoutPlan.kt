@@ -42,7 +42,7 @@ internal fun reconstructTakeoutPlan(archive: TakeoutArchive, start: LocalDate, e
     if (TakeoutType.SLEEP in types && archive.thirdPartySleepIds != null) {
         val sources = archive.thirdPartySleepIds
         takeoutSleepGroups(archive.sleeps).forEach { group ->
-            val v2 = selectedSleepV2(group)
+            val v2 = selectedSleepForImport(group)
             if (v2 != null && group.none { it.id in sources }) {
                 v2.forEach { row ->
                 if (row.end >= from && row.end < until && classifySleep(row, emptyList()) == ImportDecision.INSERT) {
@@ -54,8 +54,8 @@ internal fun reconstructTakeoutPlan(archive: TakeoutArchive, start: LocalDate, e
     }
     if (TakeoutType.EXERCISE in types) {
         val rows = archive.readExercises()
-        val decisions = selectedTakeoutExercises(rows)
-        rows.filter { it.start >= from && it.start < until && decisions[it.id] == ImportDecision.INSERT && !it.unsupportedDetails && it.deletionReason == "UNSPECIFIED" && it.logType in setOf("TRACKER", "AUTO_DETECTED", "MANUAL") && takeoutExerciseType(it.activity) != null }.forEach {
+        // A frozen journal decides which IDs to resume; do not recompute mutable source exclusions.
+        rows.filter { it.start >= from && it.start < until && !it.unsupportedDetails && it.deletionReason == "UNSPECIFIED" && it.logType in setOf("TRACKER", "AUTO_DETECTED", "MANUAL") && takeoutExerciseType(it.activity) != null }.forEach {
             output.add(mapTakeoutExercise(it, accountKey))
         }
     }

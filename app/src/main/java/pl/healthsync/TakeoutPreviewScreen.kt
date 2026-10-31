@@ -56,7 +56,9 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     var archive by remember { mutableStateOf<TakeoutArchive?>(null) }
     var archiveUri by remember { mutableStateOf<Uri?>(null) }
     var archiveDigest by remember { mutableStateOf<String?>(null) }
-    var accountLabel by remember { mutableStateOf("") }
+    val accountPrefs = remember { context.getSharedPreferences("takeout_settings", android.content.Context.MODE_PRIVATE) }
+    var accountLabel by remember { mutableStateOf(accountPrefs.getString("source_account", "").orEmpty()) }
+    fun updateAccount(value: String) { accountLabel = value; accountPrefs.edit().putString("source_account", value).apply() }
     var preview by remember { mutableStateOf<TakeoutPreview?>(null) }
     var activityPreview by remember { mutableStateOf<Map<TakeoutActivityKind, List<ActivityPreviewDay>>?>(null) }
     var activityKinds by remember { mutableStateOf(TakeoutActivityKind.entries.toSet()) }
@@ -141,7 +143,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
             }
         }
         if (TakeoutType.RESTING_HEART_RATE in types) Text("Tętno spoczynkowe to podsumowanie dzienne z Takeout. Connect przyjmuje całe uderzenia na minutę, dlatego wartość zostanie zaokrąglona. Dzień z dowolnym wpisem tego rodzaju w Connect zostanie pominięty.", style = MaterialTheme.typography.bodySmall)
-        if (TakeoutType.EXERCISE in types) Text("Dla nakładających się spacerów z opaski i wykrytych automatycznie wybierany jest wpis opaski. Inne nakładające się treningi są pomijane do sprawdzenia. Import obejmuje sesje i typ treningu, bez trasy i szczegółowych pomiarów.", style = MaterialTheme.typography.bodySmall)
+        if (TakeoutType.EXERCISE in types) Text("W nakładających się treningach tego samego rodzaju wybierane są sesje z opaski. Istniejące wpisy w Connect nie są usuwane; pozostałe kolizje wymagają sprawdzenia. Import obejmuje sesje i typ treningu, bez trasy i szczegółowych pomiarów.", style = MaterialTheme.typography.bodySmall)
         if (types.any { it in setOf(TakeoutType.HRV, TakeoutType.BREATHING, TakeoutType.SKIN_TEMPERATURE) }) Text("Importowane są dzienne podsumowania Health dla głównego snu, a nie szczegółowe próbki. Czas wpisu odtwarzany jest z sesji snu v2; może różnić się od czasu w Health. Dni z wpisem w Connect są pomijane.", style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { datePicker(start) { start = it } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Od ${start.format(dateFormat)}") }
@@ -158,7 +160,8 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                         permissionLauncher.launch(missing)
                         return@launch
                     }
-                    preview = withContext(Dispatchers.IO) { TakeoutInspector(client).inspect(data, types, start, end) }
+                    val exclusions = context.getSharedPreferences("takeout_exclusions", android.content.Context.MODE_PRIVATE).getStringSet("exercise_ids", emptySet()).orEmpty()
+                    preview = withContext(Dispatchers.IO) { TakeoutInspector(client, exclusions).inspect(data, types, start, end) }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     message = if (e is IllegalArgumentException || e is IllegalStateException) e.message ?: "Nie udało się porównać danych." else "Nie udało się odczytać Health Connect (${e.javaClass.simpleName}). Sprawdź zgody i spróbuj ponownie."
@@ -229,7 +232,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
         }
         val candidateCount = result.values.sumOf { days -> days.count { it.status == ActivityPreviewStatus.ESTIMATED } }
         if (candidateCount > 0) {
-            OutlinedTextField(value = accountLabel, onValueChange = { accountLabel = it }, enabled = !busy, label = { Text("Konto źródłowe") },
+            OutlinedTextField(value = accountLabel, onValueChange = ::updateAccount, enabled = !busy, label = { Text("Konto źródłowe") },
                 supportingText = { Text("Używaj tej samej nazwy konta przy kolejnych eksportach.") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Button(onClick = {
                 if (accountLabel.isBlank()) message = "Podaj nazwę konta źródłowego."
@@ -240,41 +243,24 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     }
     preview?.let { result ->
         Text("Wynik porównania", style = MaterialTheme.typography.titleMedium)
-        result.counts.forEach { (type, counts) ->
-            fun count(decision: ImportDecision) = counts[decision] ?: 0
-            val replaced = if (type == TakeoutType.SLEEP) ", pominiętych wersji v1 ${count(ImportDecision.SUPERSEDED)}" else if (type == TakeoutType.EXERCISE) ", pominiętych automatycznych spacerów ${count(ImportDecision.SUPERSEDED)}" else ""
-            Text("${type.label}: kandydatów do importu ${count(ImportDecision.INSERT)}, istniejących ${count(ImportDecision.ALREADY_PRESENT)}, konfliktów ${count(ImportDecision.CONFLICT)}, z Connect ${count(ImportDecision.ORIGINATES_IN_CONNECT)}, nieznane źródło ${count(ImportDecision.UNKNOWN_SOURCE)}$replaced.", style = MaterialTheme.typography.bodySmall)
-        }
-        if (result.sleepConflicts.isNotEmpty()) {
-            Text("Przyczyny konfliktów snu", style = MaterialTheme.typography.titleSmall)
-            result.sleepConflicts.forEach { (reason, count) -> Text("${reason.label}: $count", style = MaterialTheme.typography.bodySmall) }
-        }
-        if (result.sleepOverlapGroups.isNotEmpty()) {
-            val connect = result.sleepConnectComparison
-            Text("W parach v1/v2 wybrano v2. Dane Health mogą pokazywać inny czas snu. Dla wszystkich wersji w eksporcie: ${connect[ImportDecision.INSERT] ?: 0} sesji nie nakłada się na Connect; ${connect[ImportDecision.CONFLICT] ?: 0} wymaga sprawdzenia względem Connect.", style = MaterialTheme.typography.bodySmall)
-            var showOverlaps by remember(result) { mutableStateOf(false) }
-            TextButton(onClick = { showOverlaps = !showOverlaps }) { Text(if (showOverlaps) "Ukryj sesje" else "Pokaż nakładające się sesje (${result.sleepOverlapGroups.size})") }
-            if (showOverlaps) {
-                val dateTime = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm").withZone(zone)
-                result.sleepOverlapGroups.forEach { group ->
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            group.forEach { entry ->
-                                val s = entry.session
-                                val status = when (entry.connect.decision) {
-                                    ImportDecision.INSERT -> "Brak nakładającej się sesji w Connect"
-                                    ImportDecision.ALREADY_PRESENT -> "Sesja jest już w Connect"
-                                    else -> entry.connect.reason?.label ?: "Wymaga sprawdzenia"
-                                }
-                                Text("${dateTime.format(s.start)} – ${dateTime.format(s.end)}\nSen: ${s.minutesAsleep ?: "brak"} min · Aktualizacja: ${dateTime.format(s.lastUpdated)}\nAlgorytm: ${s.algorithmVersion ?: "brak danych"}\n$status", style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
+        if (result.skipped.isEmpty()) {
+            Text("Brak wpisów wymagających sprawdzenia.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            val dateTime = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm").withZone(zone)
+            result.skipped.groupBy { it.type }.forEach { (type, entries) ->
+                var expanded by remember(result, type) { mutableStateOf(false) }
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text("${if (expanded) "Ukryj" else "Pokaż"} wymagające sprawdzenia: ${type.label} (${entries.size})")
+                }
+                if (expanded) entries.forEach { entry ->
+                    val interval = dateTime.format(entry.time) + (entry.end?.let { " – ${dateTime.format(it)}" } ?: "")
+                    val detail = entry.description.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""
+                    Text("$interval$detail\nPowód: ${entry.reason}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
         if (result.candidates.isNotEmpty()) {
-            OutlinedTextField(value = accountLabel, onValueChange = { accountLabel = it }, enabled = !busy,
+            OutlinedTextField(value = accountLabel, onValueChange = ::updateAccount, enabled = !busy,
                 label = { Text("Konto źródłowe") }, supportingText = { Text("Podaj nazwę lub adres konta z eksportu. Używaj tej samej nazwy przy kolejnych eksportach.") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Button(onClick = {
                 if (accountLabel.isBlank()) message = "Podaj nazwę konta źródłowego."
@@ -288,7 +274,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
         OutlinedButton(onClick = { confirmUndo = session.id }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Wycofaj import ${session.startDate} – ${session.endDate}") }
     }
     if (confirmImport) AlertDialog(onDismissRequest = { confirmImport = false }, title = { Text("Import do Health Connect") },
-        text = { Text("Zostaną dodane tylko kandydaty z podglądu. Sesje snu v2 mogą różnić się od podsumowania w Health. Konflikty zostaną pominięte. Dostęp do archiwum zostanie zachowany, aby umożliwić wznowienie i wycofanie.") },
+        text = { Text("Zostaną dodane tylko kandydaty z podglądu. Sesje snu mogą różnić się od podsumowania w Health; pojedyncza sesja v1 może nie zawierać faz ani wybudzeń. Konflikty zostaną pominięte. Dostęp do archiwum zostanie zachowany, aby umożliwić wznowienie i wycofanie.") },
         confirmButton = { TextButton(onClick = {
             confirmImport = false
             val uri = archiveUri; val digest = archiveDigest; val selectedPreview = preview
