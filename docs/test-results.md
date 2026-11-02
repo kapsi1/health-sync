@@ -1,5 +1,14 @@
 # Wyniki i ograniczenia weryfikacji
 
+## Porównanie Takeout i Connect — 2026-11-02
+
+- Porównano wskazany eksport `test-data/` z aktualnymi rekordami Connect i prywatnym cache eksportu, dla wszystkich 14 statystyk. Wspólny zakres zakończonych dni: 2026-01-01–2026-10-28; eksport z 29 października jest migawką częściowego dnia. Pokrycie dni nie dowodzi kompletnej doby ani równoważności wartości.
+- Analiza CSV Python (`csv.DictReader`) uwzględniała schematy/README, poprawną dobę Warsaw/DST, źródła, wersje snu, stan usunięcia treningów i obecność faktycznie wypełnionych pól. Nie czytano tras, kont ani sekretów. Prywatne porównanie wagi/tłuszczu używało skrótów czasu i wartości; różnic precyzji nie traktowano jako nowych zdarzeń.
+- Tymczasowy `TakeoutCoverageReadOnlyProbe`: `assembleDebugAndroidTest --offline --no-daemon` **BUILD SUCCESSFUL**; `adb shell am instrument -w -e class pl.healthsync.TakeoutCoverageReadOnlyProbe pl.healthsync.test/androidx.test.runner.AndroidJUnitRunner` **OK (1 test)**. Dodatkowa, osobna próba `... -e class 'pl.healthsync.TakeoutCoverageReadOnlyProbe#refineWeights' ...` również **OK (1 test)**. Polecenia dokumentują eksperyment; test diagnostyczny usunięto następnie ze źródeł i odbudowano testowe APK. Nie jest to stały test regresyjny ani potwierdzenie implementacji API.
+- Potwierdzono bogatsze pokrycie eksportu dla wielu metryk, a zarazem istnienie historycznych rekordów tylko w Connect. Uzupełniono [plan źródeł](plan/data-sources.md) o zachowanie takich oryginałów przed migracją. Sprawdzenie obecności pól treningów wykazało brak wartości w nowych `summary_*`, mimo starszych pól urządzenia i osobnych serii intensywności.
+- Nie pobierano prywatnych danych Health API i nie odczytywano bezpośrednio komórek Sheets. Nie porównano wszystkich wartości i faz; nie wdrożono migracji, nie zmieniano pomiarów, uprawnień ani ustawień. Prywatny raport dla użytkownika zawiera liczności i zakresy; wartości pomiarów/identyfikatory nie trafiły do dokumentacji ani fixture'ów repozytorium.
+- Walidacja dokumentacji: **155 lokalnych linków, w tym 12 kotwic, 0 braków**; `git diff --check` bez błędów. Tymczasowe skrypty i pliki porównania usunięto po zakończeniu analizy; zachowano prywatny raport dla użytkownika.
+
 ## Analiza kalorii i plan źródeł — 2026-11-02
 
 - Tylko odczyt wskazanego `test-data/`: schematy README kalorii/aktywnej energii i podsumowań, zakresy dat oraz rozdzielenie źródeł. Polecenie analizy: skrypt Python podany przez stdin (`python -`) z `csv.DictReader`, lokalizacją doby Warsaw/DST i grupowaniem po źródle/dacie. Skrypt i prywatne wartości nie zostały zapisane do repo ani fixture'ów. Obecność CSV nie dowodzi kompletności dnia ani zgodności z odpowiedzią API.
