@@ -69,6 +69,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     var confirmImport by remember { mutableStateOf(false) }
     var confirmActivityImport by remember { mutableStateOf(false) }
     var confirmUndo by remember { mutableStateOf<String?>(null) }
+    var confirmCancelImport by remember { mutableStateOf<String?>(null) }
     val journal = remember { TakeoutJournalDatabase.get(context.applicationContext).journal() }
     val sessions by journal.observeSessions().collectAsState(initial = emptyList())
     val service = remember(client) { TakeoutImportService(context.applicationContext, client) }
@@ -128,6 +129,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 } finally { busy = false }
             }
         }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(if (active != null) "Wznów import" else "Wznów wycofywanie") }
+        if (active != null) OutlinedButton(onClick = { confirmCancelImport = active.id }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Anuluj import") }
     }
     OutlinedButton(onClick = { fileLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(if (archive == null) "Wybierz archiwum ZIP" else "Wybierz inne archiwum") }
     archive?.let { data ->
@@ -206,7 +208,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
             } else LinearProgressIndicator(modifier = Modifier.weight(1f))
         }
     }
-    if (message.isNotBlank()) Text(message, color = if (message.startsWith("Import zakończony") || message.startsWith("Import wznowiony") || message.startsWith("Wycofano") || message.startsWith("Zgody zaktualizowane")) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    if (message.isNotBlank()) Text(message, color = if (message.startsWith("Import zakończony") || message.startsWith("Import wznowiony") || message.startsWith("Wycofano") || message.startsWith("Anulowano import") || message.startsWith("Zgody zaktualizowane")) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     activityPreview?.let { result ->
         Text("Aktywność — analiza", style = MaterialTheme.typography.titleMedium)
         Text("Wyniki są szacunkowe; priorytet: opaska, telefon, Health, Fit. Różne wpisy kalorii w tej samej minucie są sumowane. Wpisy z Connect są pomijane. Analiza niczego nie zapisuje.", style = MaterialTheme.typography.bodySmall)
@@ -236,7 +238,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 supportingText = { Text("Używaj tej samej nazwy konta przy kolejnych eksportach.") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Button(onClick = {
                 if (accountLabel.isBlank()) message = "Podaj nazwę konta źródłowego."
-                else if (active != null || undoing != null) message = "Najpierw wznów przerwaną operację."
+                else if (active != null || undoing != null) message = "Najpierw wznów przerwaną operację lub anuluj import."
                 else confirmActivityImport = true
             }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Importuj szacunkowe dni ($candidateCount)") }
         }
@@ -264,7 +266,7 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
                 label = { Text("Konto źródłowe") }, supportingText = { Text("Podaj nazwę lub adres konta z eksportu. Używaj tej samej nazwy przy kolejnych eksportach.") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Button(onClick = {
                 if (accountLabel.isBlank()) message = "Podaj nazwę konta źródłowego."
-                else if (active != null || undoing != null) message = "Najpierw wznów przerwaną operację."
+                else if (active != null || undoing != null) message = "Najpierw wznów przerwaną operację lub anuluj import."
                 else confirmImport = true
             }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Importuj ${result.candidates.size} rekordów do Connect") }
         }
@@ -273,6 +275,22 @@ internal fun TakeoutPreviewScreen(client: HealthConnectClient, onClose: () -> Un
     if (active == null && undoing == null) completed.forEach { session ->
         OutlinedButton(onClick = { confirmUndo = session.id }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Wycofaj import ${session.startDate} – ${session.endDate}") }
     }
+    confirmCancelImport?.let { sessionId -> AlertDialog(onDismissRequest = { confirmCancelImport = null }, title = { Text("Anulować import?") },
+        text = { Text("Niezapisane rekordy nie zostaną zaimportowane. Dane już zapisane pozostaną w Health Connect, ale mogą nie być jeszcze przygotowane do synchronizacji. Anulowanego importu nie można wznowić ani automatycznie wycofać.") },
+        confirmButton = { TextButton(onClick = {
+            confirmCancelImport = null
+            scope.launch {
+                busy = true; message = ""
+                try {
+                    withContext(Dispatchers.IO) { service.cancelImport(sessionId) }
+                    preview = null; activityPreview = null
+                    message = "Anulowano import. Zapisane dane pozostały w Health Connect."
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    message = "Nie udało się anulować importu: ${e.message ?: e.javaClass.simpleName}."
+                } finally { busy = false }
+            }
+        }) { Text("Anuluj import") } }, dismissButton = { TextButton(onClick = { confirmCancelImport = null }) { Text("Wróć") } }) }
     if (confirmImport) AlertDialog(onDismissRequest = { confirmImport = false }, title = { Text("Import do Health Connect") },
         text = { Text("Zostaną dodane tylko kandydaty z podglądu. Sesje snu mogą różnić się od podsumowania w Health; pojedyncza sesja v1 może nie zawierać faz ani wybudzeń. Konflikty zostaną pominięte. Dostęp do archiwum zostanie zachowany, aby umożliwić wznowienie i wycofanie.") },
         confirmButton = { TextButton(onClick = {

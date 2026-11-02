@@ -107,6 +107,11 @@ internal abstract class TakeoutJournalDao {
     }
 
     @Transaction
+    open suspend fun cancelImport(sessionId: String) {
+        check(setSessionStatus(sessionId, "cancelled") == 1) { "Sesja importu nie jest aktywna" }
+    }
+
+    @Transaction
     open suspend fun beginUndo(sessionId: String) {
         val state = session(sessionId)?.status
         check(state == "complete" || state == "undoing") { "Najpierw zakończ lub wznów import" }

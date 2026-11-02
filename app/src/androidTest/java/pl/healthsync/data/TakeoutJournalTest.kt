@@ -76,6 +76,28 @@ class TakeoutJournalTest {
         assertNull(dao.session("run"))
     }
 
+    @Test fun cancellingImportPreservesRecordsAndReleasesUnfinishedSession() = runTest {
+        val candidates = listOf(TakeoutWriteCandidate("a", "sleep", "hash-a"), TakeoutWriteCandidate("b", "weight", "hash-b"))
+        dao.createPlan(session, candidates)
+        dao.confirm("run", "a", "id-a", "2026-02-01T00:00:00Z")
+        val records = dao.records("run")
+        dao.cancelImport("run")
+        assertEquals("cancelled", dao.session("run")?.status)
+        assertEquals(records, dao.records("run"))
+        assertTrue(dao.unfinishedSessions().isEmpty())
+        try { dao.cancelImport("run"); fail("Expected failure") } catch (_: IllegalStateException) { }
+        try { dao.finish("run"); fail("Expected failure") } catch (_: IllegalStateException) { }
+    }
+
+    @Test fun cancellingImportDoesNotCancelUndo() = runTest {
+        dao.createPlan(session, listOf(TakeoutWriteCandidate("a", "sleep", "hash-a")))
+        dao.confirm("run", "a", "id-a", "2026-02-01T00:00:00Z")
+        dao.finish("run")
+        dao.beginUndo("run")
+        try { dao.cancelImport("run"); fail("Expected failure") } catch (_: IllegalStateException) { }
+        assertEquals("undoing", dao.session("run")?.status)
+    }
+
     @Test fun undoCheckpointIsResumableAndRequiresConfirmedIdentity() = runTest {
         dao.createPlan(session, listOf(TakeoutWriteCandidate("a", "sleep", "hash-a")))
         dao.confirm("run", "a", "id-a", "2026-02-01T00:00:00Z")

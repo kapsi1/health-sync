@@ -82,6 +82,15 @@ internal class TakeoutImportService(private val context: Context, private val cl
         execute(session, plan, progress)
     }
 
+    /** Abandons the remaining plan without deleting records or their journal evidence. */
+    suspend fun cancelImport(sessionId: String) = takeoutSessionLock.withLock {
+        val session = dao.session(sessionId) ?: error("Nie znaleziono sesji importu")
+        dao.cancelImport(sessionId)
+        val runId = if (session.selectedTypes.startsWith(ACTIVITY_SESSION_PREFIX)) "takeout-activity-$sessionId" else "takeout-$sessionId"
+        runCatching { journal.event(runId, "Takeout", "Anulowano dalszy import; zapisane dane pozostawiono w Health Connect.", complete = true) }
+        Unit
+    }
+
     /** Leaves the session in undoing state until the sheet and local cache are reconciled. */
     suspend fun undoConnect(sessionId: String): Map<String, Set<LocalDate>> = takeoutSessionLock.withLock {
         val session = dao.session(sessionId) ?: error("Nie znaleziono sesji importu")

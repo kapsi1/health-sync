@@ -67,7 +67,7 @@ internal fun takeoutRecordTime(record: Record): Instant = when (record) {
     else -> error("Nieobsługiwany rekord Takeout")
 }
 
-/** Hashes the full payload; does not include Health Connect-generated IDs or timestamps. */
+/** Hashes the import identity and supported record fields, excluding Connect-generated metadata. */
 internal fun takeoutPayloadCandidate(record: Record): TakeoutWriteCandidate {
     val digest = MessageDigest.getInstance("SHA-256")
     fun add(value: String) {
@@ -132,6 +132,18 @@ internal fun takeoutPayloadMatches(expected: Record, actual: Record): Boolean {
             beatsPerMinute = actual.beatsPerMinute, metadata = actual.metadata)
         return takeoutPayloadCandidate(expected) == takeoutPayloadCandidate(normalized)
     }
+    if (expected is BodyFatRecord && actual is BodyFatRecord && expected.zoneOffset == null &&
+        actual.zoneOffset == java.time.ZoneId.of("Europe/Warsaw").rules.getOffset(expected.time)) {
+        val normalized = BodyFatRecord(time = actual.time, zoneOffset = null,
+            percentage = actual.percentage, metadata = actual.metadata)
+        return takeoutPayloadCandidate(expected) == takeoutPayloadCandidate(normalized)
+    }
+    if (expected is WeightRecord && actual is WeightRecord && expected.zoneOffset == null &&
+        (actual.zoneOffset == null || actual.zoneOffset == java.time.ZoneId.of("Europe/Warsaw").rules.getOffset(expected.time)) &&
+        (actual.time == expected.time || actual.time == Instant.ofEpochMilli(expected.time.toEpochMilli()))) {
+        val normalized = WeightRecord(time = expected.time, zoneOffset = null, weight = actual.weight, metadata = actual.metadata)
+        return takeoutPayloadCandidate(expected) == takeoutPayloadCandidate(normalized)
+    }
     return false
 }
 
@@ -142,6 +154,8 @@ internal class HealthConnectTakeoutGateway(
     planned: List<TakeoutPlannedRecord>,
 ) : TakeoutWriteGateway, TakeoutBatchWriteGateway, TakeoutUndoGateway {
     private val records = planned.associateBy { requireNotNull(it.record.metadata.clientRecordId) }
+    private val ambiguousWeightMillis = planned.mapNotNull { (it.record as? WeightRecord)?.time?.toEpochMilli() }
+        .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
     init {
         require(records.size == planned.size)
         planned.forEach { item ->
@@ -167,6 +181,8 @@ internal class HealthConnectTakeoutGateway(
     override suspend fun inspect(candidate: TakeoutWriteCandidate): TakeoutWriteCheck {
         val planned = records[candidate.clientId] ?: return TakeoutWriteCheck.Blocked("Brak danych zaplanowanego rekordu")
         check(takeoutPayloadCandidate(planned.record) == candidate) { "Zawartość rekordu uległa zmianie" }
+        if (planned.record is WeightRecord && planned.record.time.toEpochMilli() in ambiguousWeightMillis)
+            return TakeoutWriteCheck.Blocked("Kilka ważeń ma ten sam czas z dokładnością do milisekundy")
         val type = when (planned.record) {
             is WeightRecord -> TakeoutType.WEIGHT
             is BodyFatRecord -> TakeoutType.FAT
@@ -192,7 +208,9 @@ internal class HealthConnectTakeoutGateway(
         }
         check(client.permissionController.getGrantedPermissions().containsAll(takeoutReadPermissions(setOf(type)) + write)) { "Brak wymaganej zgody Health Connect" }
         val existing: List<Record> = when (val row = planned.record) {
-            is WeightRecord -> readAll(WeightRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter { it.time == row.time }
+            is WeightRecord -> readAll(WeightRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter {
+                it.time.toEpochMilli() == row.time.toEpochMilli() || (it.metadata.dataOrigin.packageName == ownPackage && it.metadata.clientRecordId == candidate.clientId)
+            }
             is BodyFatRecord -> readAll(BodyFatRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter { it.time == row.time }
             is HeightRecord -> readAll(HeightRecord::class, TimeRangeFilter.between(row.time.minusSeconds(1), row.time.plusSeconds(1))).filter { it.time == row.time }
             is RestingHeartRateRecord -> {
@@ -213,7 +231,7 @@ internal class HealthConnectTakeoutGateway(
         val owned = existing.filter { it.metadata.dataOrigin.packageName == ownPackage && it.metadata.clientRecordId == candidate.clientId }
         if (existing.size > owned.size || owned.size > 1) return TakeoutWriteCheck.Blocked("W Health Connect pojawiły się inne nakładające się dane")
         val match = owned.singleOrNull() ?: return TakeoutWriteCheck.Missing
-        if (!takeoutPayloadMatches(planned.record, match)) return TakeoutWriteCheck.Blocked("Poprzednio zapisany rekord został zmieniony")
+        if (!takeoutPayloadMatches(planned.record, match)) return TakeoutWriteCheck.Blocked("Zapisany rekord nie odpowiada planowi importu: ${type.label}")
         return TakeoutWriteCheck.AlreadyWritten(TakeoutWriteReceipt(match.metadata.id, match.metadata.lastModifiedTime.toString()))
     }
 
@@ -278,10 +296,19 @@ internal class HealthConnectTakeoutGateway(
                 TakeoutType.SKIN_TEMPERATURE -> readAll(SkinTemperatureRecord::class, filter)
             }
             val byTime = if (type == TakeoutType.SLEEP) emptyMap() else existing.groupBy(::takeoutRecordTime)
+            val weightsByMillisecond = if (type == TakeoutType.WEIGHT) existing.groupBy { takeoutRecordTime(it).toEpochMilli() } else emptyMap()
             val byDay = if (type == TakeoutType.RESTING_HEART_RATE) existing.groupBy { takeoutRecordTime(it).atZone(java.time.ZoneId.of("Europe/Warsaw")).toLocalDate() } else emptyMap()
             for ((candidate, item) in group) {
+                if (item.record is WeightRecord && item.record.time.toEpochMilli() in ambiguousWeightMillis) {
+                    result[candidate.clientId] = TakeoutWriteCheck.Blocked("Kilka ważeń ma ten sam czas z dokładnością do milisekundy")
+                    continue
+                }
                 val relevant: List<Record> = when (val row = item.record) {
-                    is WeightRecord, is BodyFatRecord, is HeightRecord -> byTime[takeoutRecordTime(row)].orEmpty()
+                    is WeightRecord -> (weightsByMillisecond[row.time.toEpochMilli()].orEmpty() + existing.filter {
+                        it.metadata.dataOrigin.packageName == ownPackage && it.metadata.clientRecordId == candidate.clientId &&
+                            takeoutRecordTime(it).toEpochMilli() != row.time.toEpochMilli()
+                    })
+                    is BodyFatRecord, is HeightRecord -> byTime[takeoutRecordTime(row)].orEmpty()
                     is RestingHeartRateRecord -> byDay[row.time.atZone(java.time.ZoneId.of("Europe/Warsaw")).toLocalDate()].orEmpty()
                     is SleepSessionRecord -> existing.filterIsInstance<SleepSessionRecord>().filter {
                         it.startTime < item.sleepSourceEnd!! && item.sleepSourceStart!! < it.endTime && !isKnownSleepSibling(item, it)
@@ -295,7 +322,7 @@ internal class HealthConnectTakeoutGateway(
                 result[candidate.clientId] = when {
                     relevant.size > owned.size || owned.size > 1 -> TakeoutWriteCheck.Blocked("W Health Connect pojawiły się inne nakładające się dane")
                     owned.isEmpty() -> TakeoutWriteCheck.Missing
-                    !takeoutPayloadMatches(item.record, owned.single()) -> TakeoutWriteCheck.Blocked("Poprzednio zapisany rekord został zmieniony")
+                    !takeoutPayloadMatches(item.record, owned.single()) -> TakeoutWriteCheck.Blocked("Zapisany rekord nie odpowiada planowi importu: ${type.label}")
                     else -> owned.single().let { TakeoutWriteCheck.AlreadyWritten(TakeoutWriteReceipt(it.metadata.id, it.metadata.lastModifiedTime.toString())) }
                 }
             }

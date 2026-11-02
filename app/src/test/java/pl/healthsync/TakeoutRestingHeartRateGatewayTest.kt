@@ -4,8 +4,12 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.RestingHeartRateRecord
+import androidx.health.connect.client.records.BodyFatRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.response.ReadRecordsResponse
+import androidx.health.connect.client.units.Percentage
+import androidx.health.connect.client.units.Mass
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -24,6 +28,51 @@ class TakeoutRestingHeartRateGatewayTest {
         assertTrue(takeoutPayloadMatches(planned, actual(ZoneOffset.ofHours(2))))
         assertFalse(takeoutPayloadMatches(planned, actual(ZoneOffset.ofHours(1))))
         assertFalse(takeoutPayloadMatches(planned, actual(ZoneOffset.ofHours(2), bpm = planned.beatsPerMinute + 1)))
+    }
+    @Test fun `body fat matches only Warsaw offset for measurement time with all other fields unchanged`() {
+        for ((time, offset) in listOf(
+            "2026-01-15T12:00:00Z" to ZoneOffset.ofHours(1),
+            "2026-07-15T12:00:00Z" to ZoneOffset.ofHours(2),
+            "2026-03-29T00:59:59Z" to ZoneOffset.ofHours(1),
+            "2026-03-29T01:00:00Z" to ZoneOffset.ofHours(2),
+        )) {
+            val at = Instant.parse(time)
+            val planned = mapTakeoutMeasurement(TakeoutMeasurement(TakeoutKind.BODY_FAT, at, 20.0, "Google Health App"), "account") as BodyFatRecord
+            fun actual(time: Instant = at, zone: ZoneOffset? = offset, value: Double = 20.0, metadata: Metadata = planned.metadata) =
+                BodyFatRecord(time, zone, Percentage(value), metadata)
+            assertTrue(takeoutPayloadMatches(planned, actual(zone = null)))
+            assertTrue(takeoutPayloadMatches(planned, actual()))
+            assertFalse(takeoutPayloadMatches(planned, actual(zone = ZoneOffset.UTC)))
+            assertFalse(takeoutPayloadMatches(planned, actual(value = 20.1)))
+            assertFalse(takeoutPayloadMatches(planned, actual(time = at.plusSeconds(1))))
+            assertFalse(takeoutPayloadMatches(planned, actual(metadata = Metadata.unknownRecordingMethod(clientRecordId = "different", clientRecordVersion = 0))))
+            assertFalse(takeoutPayloadMatches(planned, actual(metadata = Metadata.unknownRecordingMethod(clientRecordId = requireNotNull(planned.metadata.clientRecordId), clientRecordVersion = 1))))
+            val explicitlyZoned = actual()
+            assertFalse(takeoutPayloadMatches(explicitlyZoned, actual(zone = null)))
+            assertFalse(takeoutPayloadMatches(explicitlyZoned, actual(zone = ZoneOffset.UTC)))
+        }
+    }
+    @Test fun `weight allows only observed offset and millisecond truncation`() {
+        for ((time, offset) in listOf(
+            "2026-01-15T12:00:00.123456Z" to ZoneOffset.ofHours(1),
+            "2026-07-15T12:00:00.123456Z" to ZoneOffset.ofHours(2),
+            "2026-03-29T00:59:59.123456Z" to ZoneOffset.ofHours(1),
+            "2026-03-29T01:00:00.123456Z" to ZoneOffset.ofHours(2),
+        )) {
+            val at = Instant.parse(time)
+            val planned = mapTakeoutMeasurement(TakeoutMeasurement(TakeoutKind.WEIGHT, at, 70.0, "Google Health App"), "account") as WeightRecord
+            fun actual(time: Instant = Instant.ofEpochMilli(at.toEpochMilli()), zone: ZoneOffset? = offset, value: Double = 70.0, metadata: Metadata = planned.metadata) =
+                WeightRecord(time, zone, Mass.kilograms(value), metadata)
+            assertTrue(takeoutPayloadMatches(planned, actual()))
+            assertTrue(takeoutPayloadMatches(planned, actual(time = at)))
+            assertTrue(takeoutPayloadMatches(planned, actual(zone = null)))
+            assertFalse(takeoutPayloadMatches(planned, actual(zone = ZoneOffset.UTC)))
+            assertFalse(takeoutPayloadMatches(planned, actual(value = 71.0)))
+            assertFalse(takeoutPayloadMatches(planned, actual(time = at.plusNanos(1))))
+            assertFalse(takeoutPayloadMatches(planned, actual(time = Instant.ofEpochMilli(at.toEpochMilli() + 1))))
+            assertFalse(takeoutPayloadMatches(planned, actual(metadata = Metadata.unknownRecordingMethod(clientRecordId = "different", clientRecordVersion = 0))))
+            assertFalse(takeoutPayloadMatches(planned, actual(metadata = Metadata.unknownRecordingMethod(clientRecordId = requireNotNull(planned.metadata.clientRecordId), clientRecordVersion = 1))))
+        }
     }
     @Test fun `Connect resting heart rate rounds source decimals to nearest whole beat`() {
         val at = Instant.parse("2026-06-12T00:00:00Z")
