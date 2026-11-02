@@ -25,6 +25,8 @@ Stan kodu sprawdzony: **2026-11-02**. Punkty wejścia: `MetricRegistry`, `Health
 
 Kroki, kalorie, dystans, ćwiczenia, tętno spoczynkowe i waga używają agregacji SDK Connect. Pozostałe mają własną logikę na paginowanych rekordach. Własne średnie próbek nie są ważone czasem; rekordy różnych źródeł mają równą wagę, więc duplikaty mogą wpływać na wynik. Nie odtwarzaj szczegółowej synchronizacji tętna usuniętej na życzenie użytkownika. Piętra, przewyższenie, dobowe tętno średnie/min/max, VO₂ max, beztłuszczowa masa, wzrost i nawodnienie nie są aktywnymi statystykami.
 
+Ograniczenia obecnego odczytu kalorii: agregat total może zawierać bazowe uzupełnienie luk, także bez rekordów total; aplikacja nie kwalifikuje jeszcze takich wyników ani porównywalności modeli active. Diagnostyka wykazała także różny wynik tego samego dnia zależnie od tego, czy jest pierwszym dniem lokalnego zapytania, czy leży wewnątrz większego zakresu, mimo poprawnych offsetów rekordów. Przyczyna wewnątrz SDK/systemu pozostaje nieustalona — [dowody](test-results.md). Korekta granic odczytu, wykluczenie samego BMR, braków i nieporównywalnych szacunków telefonu oraz migracja 2026 są w [planie kalorii](plan/calories.md). Ten plan i nowa kolumna [„Uwagi”](plan/shared.md#uwagi-do-dnia) nie są jeszcze działającym kontraktem implementacji. Obecny przepływ Connect→Room→Sheets pozostaje; rekomendację jego rozszerzenia opisuje [analiza źródeł](plan/data-sources.md).
+
 ## Dzień, braki i historia
 
 - Uzgodniona strefa: `Europe/Warsaw`, przedziały półotwarte `[start, endExclusive)`. Sen przypisujemy do dnia zakończenia całej sesji. Import Takeout przyjmuje końcową datę włącznie i przelicza ją na wyłączny koniec przedziału.

@@ -6,6 +6,8 @@ Przegląd kodu i porządkowanie: **2026-11-02**. Wybierz kontekst zadania; nie c
 | --- | --- |
 | Pierwsza sesja / miejsce zmiany | [AGENTS](../AGENTS.md), [README](../README.md), [architektura](architecture.md) |
 | Metryki, sen, agregacja, migracje, Sheets | [Kontrakty danych](data-contracts.md) |
+| Jakość kalorii całkowitych/aktywnych, korekta 2026 | [Plan kalorii](plan/calories.md), [wspólne „Uwagi”](plan/shared.md#uwagi-do-dnia) |
+| Wybór źródła prawdy, własna baza, różnice API/Connect | [Analiza i plan źródeł](plan/data-sources.md) |
 | Takeout: parsery, konflikty, zapis i sesje | [Kontrakt](takeout.md), [pozostałe A](plan/takeout.md) |
 | Środowisko, testy, APK | [Development](development.md), [wyniki/luki](test-results.md) |
 | OAuth / dostęp do pliku | [Google Cloud](google-cloud.md) |

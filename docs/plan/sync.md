@@ -4,6 +4,7 @@
 
 ## Pozostałe prace
 
+- [ ] Wdrożyć [kontrakt kalorii](calories.md) dla historii 2026 i bieżących dni oraz wspólne [„Uwagi”](shared.md#uwagi-do-dnia) dla wszystkich metryk. Zastąpić/wyczyścić stare tymczasowe wyniki po ponownej ocenie, bez pozostawiania BMR i nieporównywalnych aktywnych kalorii telefonu jako pełnych danych.
 - [ ] Bezpiecznie obsłużyć usunięcia i zmianę daty pomiaru: minimalne mapowanie ID→dzień, pełny potwierdzony ponowny odczyt i dopiero ewentualne czyszczenie właściwej komórki. Brak zgody, pusty niepełny odczyt i błąd nigdy nie oznaczają usunięcia.
 - [ ] Uzupełnić szczegółowe działania naprawcze w dzienniku; zachować kody HTTP, kierowanie do właściwej zakładki oraz rozróżnienie ostatniej próby od wcześniejszych błędów i zapisów do istniejących wierszy od rzeczywistych zmian wartości.
 - [ ] Wykonać pozostałe próby urządzenia opisane w [wynikach testów](../test-results.md): restart/wznowienie, sieć, zgody, Picker, odtworzenie ustawień, duża historia, współbieżność i agregaty. Testów fikcyjnych nie traktować jako dowodu na danych użytkownika.
