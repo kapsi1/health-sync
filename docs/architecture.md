@@ -1,29 +1,65 @@
-# Architektura Health Sync
+# Architektura i mapa kodu
 
-Health Connect jest obecnie jedynym zaimplementowanym źródłem synchronizacji. Aplikacja odczytuje dostępne, wybrane statystyki i przelicza je na dni w strefie `Europe/Warsaw`; nie pobiera historii przechowywanej wyłącznie w Google Health/Fitbit. Docelowo Connect pozostaje podstawowym źródłem prawdy po uzupełnieniu historii z Takeout przez aplikację mobilną. Plan obejmuje osobne wzbogacanie arkusza o zatwierdzone dodatkowe pola API, jednorazowy desktopowy import tych samych pól z Takeout oraz niezależny proces odżywiania z innego arkusza do Connect. Żadna z tych czterech nowych funkcji nie jest zaimplementowana; przed rozpoczęciem każdej z nich trzeba zapytać użytkownika i uzyskać zgodę. Zakres i kolejność opisuje `health_connect_sheets_agent_plan.md`. Sleep score jest wyłączony ze względu na brak równoważnego pola API.
+Stan kodu sprawdzony: **2026-11-02**. Jeden moduł Android `:app`, pakiet `pl.healthsync`; brak backendu i modułu desktopowego/API. Kotlin + Compose/Material 3, Health Connect, Room, DataStore, WorkManager i Google Identity/Sheets. Wersje: [app/build.gradle.kts](../app/build.gradle.kts), [build.gradle.kts](../build.gradle.kts).
 
-## Przepływ danych
+## Przepływy
 
-1. `MetricRegistry` opisuje statystyki, uprawnienia i kolumny. Wybór jest zapisywany w DataStore.
-2. `HealthHistorySource` odczytuje dane z Health Connect. `HistoryImport` dzieli ręczny import na miesięczne porcje, zapisuje wyniki, a po przerwaniu wznawia trwałą sesję. Wznowienie z identyczną datą i wyborem statystyk pomija ukończone porcje; nowe niezależne uruchomienie przelicza wybrany zakres.
-3. Room przechowuje obserwacje dzienne, checkpointy, sesję importu i kolejkę dni. Zapis porcji, checkpointu i oznaczenie jej do wysłania są transakcyjne. Brak odczytanej wartości nie kasuje wcześniejszej.
-4. `SheetSync` przed każdą porcją pobiera aktualny stan zakładki `daily`, sprawdza nagłówki i unikalność dat, a następnie dodaje nowe wiersze lub zapisuje wybrane komórki istniejących. Po wysyłce sortuje wiersze zakładki `daily` rosnąco według daty: nagłówek pozostaje na miejscu, a wszystkie kolumny przemieszczają się razem z wierszami. Kolejkę potwierdza dopiero po udanym sortowaniu, o ile lokalne dane nie zmieniły się w międzyczasie. Po niejednoznacznym wyniku ponowna próba ponownie odczytuje arkusz.
-5. WorkManager okresowo przelicza ostatnie trzy dni oraz sprawdza listę zmian wagi i tkanki tłuszczowej. Starsze zmiany są przeliczane dla ich dat. Po wygaśnięciu tokenu aplikacja odtwarza poprzednio importowany zakres, porcjowo.
+```text
+MainActivity / BackgroundSyncWorker
+  → HealthHistorySource → HistoryImport → RoomHistoryStore → SyncDatabase
+  → RoomPendingQueue → SheetSync → SheetGatewayHttp → Google Sheets/daily
 
-Operacje na arkuszu są serializowane między synchronizacją ręczną, tłem i zmianą pliku. Kolejność kolumn jest ustalana na podstawie nagłówków. Kolumny wyłączonych statystyk są ukrywane, a po włączeniu dodawane albo odkrywane; pozostałe zakładki i kolumny pozostają pod kontrolą użytkownika.
+TakeoutPreviewScreen → lokalny ZIP → parsery → Inspector → podgląd
+  → zatwierdzenie → ImportService → trwały plan w TakeoutJournalDatabase
+  → BatchWriteCoordinator → HealthConnectTakeout…Gateway → Health Connect
+  → ponowny odczyt dotkniętych dat przez HistoryImport → zwykła kolejka Sheets
+```
 
-W `daily` nagłówki statystyk odpowiadają nazwom w aplikacji, a data ma nagłówek `Data`. Wewnętrzne identyfikatory, np. `distance_km`, pozostają niezmienne w bazie i kolejce. Warstwa arkusza mapuje obie formy na identyfikatory; podczas synchronizacji starsze nagłówki są zmieniane w miejscu. Kolizja polskiej i dawnej nazwy tego samego pola albo formuła zwracająca nagłówek aplikacji blokuje synchronizację. Nazwy statystyk są zarezerwowane dla kolumn aplikacji. Przesuwanie kolumn statystyk jest możliwe; `Data` musi pozostać pierwsza. Samodzielna zmiana tekstu nagłówka aplikacji na dowolną nazwę nie jest wspierana — rozpoznawane są zdefiniowane nazwy, nie metadane. Formuły użytkownika wyszukujące stary tekst nagłówka mogą wymagać zmiany.
+Takeout jest ręczną operacją; worker go nie uruchamia. Dane zapisane w chmurze Google Health, których nie ma w Connect, nie są automatycznie pobierane. Przyszłe źródła: [plan](plan/README.md).
 
-Eksport zaokrągla `total_kcal` i `active_kcal` do całkowitej liczby, a pozostałe wartości liczbowe do maksymalnie dwóch miejsc przed wysłaniem przez API; Room zachowuje pełną precyzję. Starsze wartości kalorii otrzymują format bez ułamka, ale ich zapisany wynik jest przeliczany dopiero po ponownym imporcie odpowiedniego zakresu. Format kolumn jest uzupełnieniem prezentacji. `exercise_hours`, `sleep_hours` i `sleep_awake_hours` są zapisywane jako tekst `hh:mm:ss`, z godzinami bez zawijania po 24. Dawne liczbowe czasy są konwertowane przy uzgadnianiu kolumn, bez zmiany tekstów i formuł.
+## Gdzie zmieniać kod
 
-`sleep_hours` sumuje fazy SLEEPING/LIGHT/DEEP/REM. Opcjonalne `sleep_awake_hours` sumuje AWAKE/AWAKE_IN_BED/OUT_OF_BED tylko między pierwszą i ostatnią fazą snu w danej sesji, bez minimalnej długości ponownego snu. Zasypianie i końcowe czuwanie są wyłączone. Oba wyniki sumuje się dla sesji zakończonych danego dnia w Europe/Warsaw. Luka między oddzielnymi sesjami nie jest automatycznie traktowana jako czuwanie. Brak faz, nieznane fazy, luki, nieprawidłowe przedziały i nakładające się fazy nie są zgadywane. Pełny czas snu wymaga kompletnej osi faz sesji; wybudzenia mogą być dostępne przy kompletnych fazach wewnętrznych mimo nieznanych brzegów. Gdy jednej sesji brakuje wyniku, nie eksportujemy częściowej sumy jako pełnej statystyki dobowej. Nakładające się sesje wciąż powodują błąd wymagający rozstrzygnięcia, zamiast podwójnego liczenia. Brak nowego wyniku nie usuwa starych danych z Room/Sheets; dawne wartości liczące pełną sesję wymagają ponownego importu, a przy niekompletnych fazach mogą pozostać do ręcznego wyjaśnienia.
+Wszystkie poniższe ścieżki są względem [app/src/main/java/pl/healthsync](../app/src/main/java/pl/healthsync/).
 
-## Dostęp i diagnostyka
+| Obszar | Pliki / symbole i odpowiedzialność |
+| --- | --- |
+| UI i składanie zależności | `MainActivity.kt`: Sync, Dane, Arkusz, Dziennik, ręczny import, zgody; `TakeoutPreviewScreen.kt`: lokalny ZIP, analiza, zapis i sesje; `GoogleAuthorization.kt`: OAuth, Picker, wybór/tworzenie pliku i wysyłka |
+| Katalog i wybór | `MetricRegistry.kt`: ID, etykiety, jednostki, kolumny, aliasy i zgody; `MetricSelection.kt`: wybór i zlecenia backfill; `data/SelectedMetricBackfill.kt`: ich realizacja |
+| Odczyt Connect | `data/HealthHistorySource.kt`: agregaty i paginowane rekordy; `DailyPreview.kt`: ograniczony podgląd, nie trwały import |
+| Reguły agregacji | `SleepDaily.kt`, `SleepRecordMapping.kt`, `BodyFatDaily.kt`, `domain/SleepRespiratory.kt`; definicje w [kontraktach](data-contracts.md) |
+| Historia i zmiany | `domain/HistoryImport.kt`: miesięczne porcje, checkpointy, wznowienie; `domain/ChangesScan.kt`, `ChangesRecovery.kt` + `data/HealthChanges.kt`: zmiany wagi/tłuszczu i odtwarzanie po wygaśnięciu tokenu |
+| Lokalny zapis i wysyłka | `data/SyncDatabase.kt`: encje/DAO/migracje; `RoomHistoryStore.kt`: transakcje importu; `RoomPendingQueue.kt`: wybór komórek i rewizje |
+| Sheets | `domain/SheetSync.kt`: orkiestracja snapshot → plan → zapis → sortowanie → potwierdzenie; `SheetMerge.kt`, `SheetHeaders.kt`, `SheetColumns.kt`, `SheetDisplay.kt`: czyste reguły; `data/SheetGatewayHttp.kt`, `SheetsCreator.kt`, `SheetSettings.kt`: HTTP, plik i ustawienia |
+| Automatyzacja | `BackgroundSync.kt`: ustawienia i `BackgroundSyncWorker`; ostatnie 3 dni (dziś i dwa poprzednie), backfill, zmiany historyczne i kolejka |
+| Dziennik i obsługa błędów | `SyncJournal.kt`, `BackgroundLog.kt`, `RecoveryDestination.kt`; bez wartości zdrowotnych/tokenów; HTTP i cel naprawy |
+| Takeout: odczyt i decyzje | `domain/TakeoutArchive.kt`, `TakeoutCsv.kt`, `TakeoutRecords.kt`, `TakeoutCompare.kt`, `TakeoutExercises.kt`, `TakeoutNightly.kt`; aktywność dzienna: `TakeoutActivity*.kt`; `data/TakeoutFile.kt`, `TakeoutInspector.kt`, `TakeoutActivityInspector.kt` |
+| Takeout: zapis i odtwarzanie | `data/TakeoutImportService.kt`, `TakeoutActivityImportService.kt`: operacje; `TakeoutRecordMapping.kt`: mapowanie do Connect; `TakeoutPlan.kt`: rekonstrukcja zamrożonego planu i daty do przeliczenia |
+| Takeout: gwarancje zapisu | `domain/TakeoutBatchWriteCoordinator.kt`, `TakeoutWriteCoordinator.kt`, `TakeoutUndoCoordinator.kt`: porty i koordynacja; `data/HealthConnectTakeoutGateway.kt`, `HealthConnectTakeoutActivityGateway.kt`: kontrola rzeczywistych rekordów; `TakeoutJournalDatabase.kt`: rejestr zamiarów i potwierdzeń |
 
-Health Connect wymaga osobnych zgód na typy danych, starszą historię i odczyt w tle. Google Identity uzyskuje uprawnienie `drive.file`; aplikacja nie ma własnego serwera ani stałego klucza w kodzie. ID lub URL istniejącego arkusza nie nadaje dostępu. Androidowy Google Picker pozwala wybrać plik i przyznać dostęp; użytkownik potwierdził działanie na urządzeniu; funkcja wymaga włączenia Google Picker API w projekcie Cloud.
+`domain/` skupia logikę i porty testowane na JVM; `data/` implementuje Android/Room/HTTP. Część czystych reguł nadal leży w pakiecie głównym. Nie jest to osobny moduł Gradle; przy małej poprawce zachowaj istniejący układ.
 
-HRV RMSSD, saturacja, oddechy, temperatura ciała, VO₂ max, tkanka tłuszczowa oraz beztłuszczowa masa ciała są średnią arytmetyczną dostępnych pomiarów z danej doby w strefie Europe/Warsaw. Są to średnie próbek, nie średnie ważone czasem ani odpowiedniki specjalnych wskaźników Google Health. Każdy rekord ma równą wagę; duplikaty między aplikacjami mogą wpłynąć na wynik. Brak pomiarów nie jest zerem. Zmiana znaczenia statystyki zachowuje identyfikator wyboru, ale korzysta z nowej kolumny arkusza; stare kolumny ostatnich pomiarów są ukrywane, zachowane i nie są interpretowane jako średnie. Migracja bazy 4→5 archiwizuje wcześniejsze lokalne obserwacje oraz checkpointy pod identyfikatorami `legacy_last:...`; nowy import wylicza średnie z Connect. Stare dane w Connect nie są zmieniane. Historię średnich uzupełnia ponowny import wybranego zakresu.
+## Trwały stan
 
-Dziennik nie zawiera wartości pomiarów ani tokenów. Liczniki wysyłki rozróżniają dodane wiersze i zapisy do istniejących. Zapis do istniejącego wiersza nie oznacza, że wartość uległa zmianie, ponieważ przed wysłaniem nie jest porównywana zawartość poszczególnych komórek. Przy niejednoznacznej odpowiedzi serwera licznik obejmuje wyłącznie zakończone porcje aktualnej próby.
+| Magazyn | Zawartość / punkt dostępu |
+| --- | --- |
+| Room `health-sync.db`, wersja 5 | `DailyObservation` (dzień + metricId), `ImportCheckpoint`, `UploadQueue`, `ManualImportSession`; `SyncDatabase` |
+| Room `takeout-import-journal.db`, wersja 2 | Sesje, digest ZIP, hash konta, zamrożone ID/hash treści, potwierdzone ID Connect i czas modyfikacji; `TakeoutJournalDatabase` |
+| DataStore `settings` | Wybrane statystyki i zlecenia uzupełniania historii; `MetricSelection` |
+| DataStore `sheet_settings`, `background_sync`, `health_changes`, `sync_journal` | Wybrany plik i niepewne utworzenie; interwał/status; tokeny/checkpointy zmian; dziennik synchronizacji |
+| SharedPreferences `takeout_settings`, `takeout_exclusions` | Nazwa konta źródłowego (`source_account`) i wykluczenia ćwiczeń (`exercise_ids`); brak UI do zarządzania wykluczeniami |
 
-Usunięcie pomiaru wagi lub tkanki tłuszczowej może zostać zasygnalizowane, ale nie powoduje usunięcia komórki w arkuszu. Automatyczne rozliczanie usunięć i zmiany daty pomiaru wymaga dalszej implementacji.
+Migracje Sync 1→2→3→4→5 i Takeout 1→2 są jawne. Sync 4→5 archiwizuje dawne lokalne „ostatnie pomiary” jako `legacy_last:…`; nowe znaczenie wymaga ponownego importu. Nie zmieniaj semantyki starych wartości przez samą zmianę etykiety.
+
+## Transakcje, wznowienie i współbieżność
+
+- `HistoryImport`: globalny `historyImportLock`; `commitChunk` zapisuje obserwacje, checkpoint i kolejkę transakcyjnie. `prepareManualSession` atomowo rozpoczyna pełne przeliczenie albo wznawia pasującą sesję. Nowe uruchomienie po ukończeniu ponownie odczytuje zakres.
+- `sheetOperationLock` w `GoogleAuthorization.kt` serializuje w jednym procesie operacje ręczne, worker, zmianę pliku oraz zapis/wycofanie Takeout i przeliczenie. `takeoutSessionLock` serializuje operacje Takeout; serwisy pozyskują go przed blokadą arkusza. Koordynatory mają również własne mutexy. Nie wprowadzaj odwrotnej kolejności ani ponownego wejścia do tej samej blokady.
+- `SheetSync` czyta aktualny snapshot przed każdą porcją (domyślnie 100 dni), zapisuje i sortuje całe wiersze. `RoomPendingQueue` potwierdza tylko niezmienioną rewizję; zmiana wyboru statystyk przerywa wysyłkę. Timeout po zapisie wymaga nowego odczytu arkusza przed ponowieniem.
+- Mutex telefonu nie chroni przed edycją arkusza z innego klienta. Obecna ścieżka aktualizuje zarządzane komórki; nie ma pełnego rejestru pochodzenia i atomowego warunkowego czyszczenia komórek.
+- Takeout zapisuje plan przed skutkiem zewnętrznym, sprawdza rekordy przed i po zapisie, potwierdza ID i treść. Wznowienie używa tego samego ZIP i zapisanego planu; szczegóły i rozróżnienie przerwania/anulowania/wycofania: [takeout.md](takeout.md).
+
+## Dostęp i granice
+
+Zgody Health Connect obejmują wybrane typy oraz osobno historię i tło. OAuth Google używa `drive.file`; ID/link nie nadaje dostępu, Picker może go nadać. Token jest uzyskiwany przez Google Identity, bez stałego sekretu w APK. Tworzenie pliku z niejednoznacznym wynikiem blokuje kolejną próbę do wyjaśnienia (`creationPending`).
+
+Usunięcia oraz zmiany dat pomiarów nie są automatycznie rozliczane w Sheets. Standardowy pusty odczyt zachowuje stare dane; wycofanie Takeout ma osobną rekonsyliację lokalną, ale zachowuje niepewne komórki arkusza. Pełne definicje: [dane](data-contracts.md), [Takeout](takeout.md). Dowody testowe i pozostałe scenariusze: [test-results.md](test-results.md).

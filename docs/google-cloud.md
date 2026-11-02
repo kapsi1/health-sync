@@ -1,16 +1,14 @@
-# Google Cloud — konfiguracja testu OAuth
+# Google Cloud — konfiguracja dostępu do Sheets
 
-Aplikacja korzysta z `drive.file`, tworzy lub podłącza arkusz i synchronizuje do niego wybrane dane zdrowotne. Konfiguracja jest prywatna; nie dodawaj kluczy, tokenów ani danych konta do repozytorium.
+Dotyczy obecnej aplikacji Android i zakresu `drive.file`; przyszłe Google Health API/desktop mają osobny plan. Sekwencję OAuth/Picker porównano z kodem i dokumentacją producenta **2026-11-02**; ustawień prywatnego projektu Cloud nie sprawdzano.
 
-1. W [Google Cloud Console](https://console.cloud.google.com/) utwórz lub wybierz własny projekt.
-2. W **APIs & Services → Library** włącz **Google Sheets API**. Aby wybierać istniejące arkusze z Dysku w aplikacji, włącz w tym samym projekcie również **Google Picker API**. Androidowy wariant w aplikacji używa istniejącego klienta OAuth Android i nie wymaga osobnego klucza API w aplikacji.
-3. W **Google Auth Platform** skonfiguruj ekran zgody oraz grupę odbiorców. Tryb **wewnętrzny** pozwala na autoryzację tylko kontom należącym do organizacji projektu. Jeśli używasz konta spoza organizacji, wybierz typ **zewnętrzny**; w statusie testowym dodaj konto używane na telefonie jako użytkownika testowego. W trybie wewnętrznym lista użytkowników testowych nie jest używana; polityki administratora mogą dodatkowo ograniczać dostęp. Przygotuj dane wymagane przez aktualny formularz Google.
-4. W **Clients → Create client** wybierz typ **Android** i wpisz nazwę pakietu `pl.healthsync` oraz odcisk SHA-1 certyfikatu bieżącej wersji debug:
+1. W [Google Cloud Console](https://console.cloud.google.com/) wybierz własny projekt. Włącz **Google Sheets API**, a do wyboru istniejącego pliku także **Google Picker API** w tym samym projekcie. Obecny wariant Android używa klienta OAuth Android, bez osobnego klucza API w aplikacji.
+2. Skonfiguruj ekran zgody/odbiorców w Google Auth Platform. Dla konta spoza organizacji wybierz odbiorców zewnętrznych; w trybie testowym dodaj konto telefonu do użytkowników testowych. Tryb wewnętrzny ogranicza konta do organizacji i nie korzysta z listy testowej; polityki administratora mogą ograniczać dostęp. Nazwy sekcji i wymagane formularze mogą się zmieniać.
+3. Utwórz klienta **Android**: pakiet `pl.healthsync` i **SHA-1 certyfikatu faktycznie instalowanego APK**, odczytany przez `./gradlew.bat signingReport`. Nie kopiuj dawnego odcisku z innego komputera. Debug/release i różne klucze wymagają odpowiednich klientów; odcisk jest publiczny, klucz prywatny nie trafia do Git.
+4. Jeśli konfigurator wymaga deklaracji zakresów, dodaj `https://www.googleapis.com/auth/drive.file`.
+5. W aplikacji wybierz **Sprawdź zgodę Google**, zaakceptuj na właściwym koncie, następnie utwórz arkusz lub wybierz istniejący przez Picker. Sam ID/URL nie nadaje dostępu.
+6. Sprawdź zapis małego zakresu do `daily`. Osobno sprawdź pracę w tle i zgodę Health Connect na tło; pomyślny OAuth na pierwszym planie nie dowodzi działania workera.
 
-   `49:0A:7D:62:32:60:96:03:69:F4:93:FA:7A:46:86:5A:64:FD:E9:F6`
+Przy problemach sprawdź projekt/API, pakiet i certyfikat, konto/odbiorców oraz dostęp do pliku. Dla nieprawidłowych nagłówków/dat popraw strukturę zgodnie z [kontraktem Sheets](data-contracts.md); kolejka pozostaje do ponowienia. Wynik tworzenia pliku o niepewnym statusie wyjaśnij przed kolejną próbą, aby nie powielać arkuszy. Nie dodawaj kont, tokenów i kluczy do repozytorium.
 
-   To publiczny odcisk certyfikatu aktualnie zbudowanego APK, nie klucz prywatny. Po zmianie klucza debug lub komputera odcisk może być inny; wersja release potrzebuje osobnego klienta dla swojego certyfikatu.
-5. W sekcji **Data Access** dodaj zakres `https://www.googleapis.com/auth/drive.file`, jeżeli wymaga tego konfigurator Google.
-6. Na telefonie uruchom aplikację i wybierz **Sprawdź zgodę Google**. Potwierdź wymagane zgody na właściwym koncie. Wynik testu nie dowodzi jeszcze działania Sheets ani pracy w tle.
-
-Źródła: [Google Picker dla Androida](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker), [autoryzacja Android](https://developer.android.com/identity/authorization), [Sheets API create](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/create).
+Źródła producenta: [Google Picker dla desktop/mobile](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker), [autoryzacja Android](https://developer.android.com/identity/authorization), [Sheets create](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/create). Polecenia środowiska: [development.md](development.md).
